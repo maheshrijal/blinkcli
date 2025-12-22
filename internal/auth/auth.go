@@ -112,6 +112,7 @@ func tryReadSession(ctx context.Context) (*config.Session, bool, error) {
 	var browserUA string
 	var appVersionRaw string
 	var rnBundleRaw string
+	var cookieRaw string
 
 	err := chromedp.Run(ctx,
 		chromedp.Evaluate(`(() => { const v = localStorage.getItem("auth"); return v === null ? "" : v; })()`, &authRaw),
@@ -124,6 +125,7 @@ func tryReadSession(ctx context.Context) (*config.Session, bool, error) {
 		chromedp.Evaluate(`navigator.userAgent`, &browserUA),
 		chromedp.Evaluate(`(() => window.__APP_VERSION__ || window.app_version || "")()`, &appVersionRaw),
 		chromedp.Evaluate(`(() => window.__RN_BUNDLE_VERSION__ || window.rn_bundle_version || "")()`, &rnBundleRaw),
+		chromedp.Evaluate(`document.cookie`, &cookieRaw),
 	)
 	if err != nil {
 		return nil, false, err
@@ -206,6 +208,23 @@ func tryReadSession(ctx context.Context) (*config.Session, bool, error) {
 					session.Cookies[c.Name] = c.Value
 				}
 			}
+		}
+	}
+	if cookieRaw != "" {
+		for _, part := range strings.Split(cookieRaw, ";") {
+			part = strings.TrimSpace(part)
+			if part == "" {
+				continue
+			}
+			name, value, ok := strings.Cut(part, "=")
+			if !ok {
+				continue
+			}
+			name = strings.TrimSpace(name)
+			if name == "" {
+				continue
+			}
+			session.Cookies[name] = strings.TrimSpace(value)
 		}
 	}
 
