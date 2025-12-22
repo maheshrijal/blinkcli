@@ -66,4 +66,6 @@ blinkcli stats
 ## Disclaimer
 
 This is a personal/community project. It uses internal Blinkit web endpoints
-and may break if the site changes.
+and may break if the site changes. This is **unofficial** and **not affiliated**
+with Blinkit or Blink Commerce Private Limited. Use at your own risk. Please
+don’t sue me.
