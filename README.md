@@ -1,7 +1,6 @@
 # blinkcli
 
 An **unofficial** command-line tool for Blinkit order history.
-Not affiliated with Blinkit or Blink Commerce Private Limited.
 
 ## Install
 
