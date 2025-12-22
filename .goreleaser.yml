@@ -12,6 +12,8 @@ builds:
     binary: blinkcli
     env:
       - CGO_ENABLED=0
+    ldflags:
+      - -s -w -X main.version={{.Version}}
     goos:
       - darwin
       - linux
@@ -31,6 +33,7 @@ brews:
     directory: Formula
     homepage: https://github.com/maheshrijal/blinkcli
     description: Unofficial Blinkit order tracker CLI
+    license: MIT
     repository:
       owner: maheshrijal
       name: homebrew-tap
@@ -39,6 +42,6 @@ brews:
       name: Mahesh Rijal
       email: 62394512+maheshrijal@users.noreply.github.com
     test: |
-      system "#{bin}/blinkcli", "auth", "status"
+      system "#{bin}/blinkcli", "version"
     install: |
       bin.install "blinkcli"
