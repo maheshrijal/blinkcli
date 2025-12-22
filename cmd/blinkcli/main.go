@@ -15,6 +15,8 @@ import (
 	"blinkcli/internal/store"
 )
 
+var version = "dev"
+
 func main() {
 	if len(os.Args) < 2 {
 		usage()
@@ -24,6 +26,8 @@ func main() {
 	switch os.Args[1] {
 	case "auth":
 		authCmd(os.Args[2:])
+	case "version":
+		fmt.Println(version)
 	case "sync":
 		syncCmd(os.Args[2:])
 	case "orders":
@@ -43,6 +47,7 @@ func usage() {
 	fmt.Println("  blinkcli auth login")
 	fmt.Println("  blinkcli auth status")
 	fmt.Println("  blinkcli auth logout")
+	fmt.Println("  blinkcli version")
 	fmt.Println("  blinkcli sync")
 	fmt.Println("  blinkcli orders")
 	fmt.Println("  blinkcli stats")

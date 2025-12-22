@@ -10,6 +10,13 @@ Build from source:
 go build -o blinkcli ./cmd/blinkcli
 ```
 
+Homebrew (once releases are published):
+
+```bash
+brew tap maheshrijal/tap
+brew install blinkcli
+```
+
 ## Auth (browser login)
 
 ```bash
