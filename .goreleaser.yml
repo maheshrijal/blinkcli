@@ -1,0 +1,44 @@
+version: 2
+
+project_name: blinkcli
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: blinkcli
+    main: ./cmd/blinkcli
+    binary: blinkcli
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin
+      - linux
+    goarch:
+      - amd64
+      - arm64
+
+archives:
+  - name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    format: tar.gz
+
+checksum:
+  name_template: checksums.txt
+
+brews:
+  - name: blinkcli
+    directory: Formula
+    homepage: https://github.com/maheshrijal/blinkcli
+    description: Unofficial Blinkit order tracker CLI
+    repository:
+      owner: maheshrijal
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    commit_author:
+      name: Mahesh Rijal
+      email: 62394512+maheshrijal@users.noreply.github.com
+    test: |
+      system "#{bin}/blinkcli", "auth", "status"
+    install: |
+      bin.install "blinkcli"
