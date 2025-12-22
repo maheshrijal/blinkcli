@@ -1,0 +1,10 @@
+# binaries
+/blinkcli
+*.exe
+*.test
+
+# local
+.DS_Store
+
+# optional build output
+bin/
