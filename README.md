@@ -4,12 +4,6 @@ An **unofficial** command-line tool for Blinkit order history.
 
 ## Install
 
-Build from source:
-
-```bash
-go build -o blinkcli ./cmd/blinkcli
-```
-
 Homebrew (once releases are published):
 
 ```bash
