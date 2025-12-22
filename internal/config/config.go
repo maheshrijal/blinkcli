@@ -3,34 +3,38 @@ package config
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"time"
 )
 
 const (
-	appDirName  = "blinkcli"
-	configName  = "config.json"
-	ordersName  = "orders.json"
+	appDirName   = "blinkcli"
+	configName   = "config.json"
+	ordersName   = "orders.json"
 	filePerm0600 = 0o600
 )
 
 // Session holds the values required to call Blinkit endpoints.
 type Session struct {
-	AccessToken string            `json:"access_token"`
-	AuthKey     string            `json:"auth_key"`
-	DeviceID    string            `json:"device_id"`
-	SessionID   string            `json:"session_uuid"`
-	Lat         float64           `json:"lat"`
-	Lon         float64           `json:"lon"`
-	WebAppVersion string          `json:"web_app_version,omitempty"`
-	AppVersion    string          `json:"app_version,omitempty"`
-	RNBundleVersion string        `json:"rn_bundle_version,omitempty"`
-	UserAgent   string            `json:"user_agent,omitempty"`
-	Phone       string            `json:"phone,omitempty"`
-	UserID      string            `json:"user_id,omitempty"`
-	Cookies     map[string]string `json:"cookies,omitempty"`
-	UpdatedAt   time.Time         `json:"updated_at"`
+	AccessToken     string            `json:"access_token"`
+	AuthKey         string            `json:"auth_key"`
+	DeviceID        string            `json:"device_id"`
+	SessionID       string            `json:"session_uuid"`
+	Lat             float64           `json:"lat"`
+	Lon             float64           `json:"lon"`
+	Locality        string            `json:"locality,omitempty"`
+	Landmark        string            `json:"landmark,omitempty"`
+	WebAppVersion   string            `json:"web_app_version,omitempty"`
+	AppVersion      string            `json:"app_version,omitempty"`
+	RNBundleVersion string            `json:"rn_bundle_version,omitempty"`
+	UserAgent       string            `json:"user_agent,omitempty"`
+	Phone           string            `json:"phone,omitempty"`
+	UserID          string            `json:"user_id,omitempty"`
+	Cookies         map[string]string `json:"cookies,omitempty"`
+	UpdatedAt       time.Time         `json:"updated_at"`
 }
 
 // Config is stored on disk in the user's config directory.
@@ -111,4 +115,44 @@ func Clear() error {
 		return err
 	}
 	return nil
+}
+
+// PopulateDerivedCookies seeds missing session cookies from known session fields.
+func PopulateDerivedCookies(session *Session) {
+	if session == nil {
+		return
+	}
+	if session.Cookies == nil {
+		session.Cookies = map[string]string{}
+	}
+	if session.AccessToken != "" {
+		if _, ok := session.Cookies["gr_1_accessToken"]; !ok {
+			session.Cookies["gr_1_accessToken"] = url.QueryEscape(session.AccessToken)
+		}
+	}
+	if session.DeviceID != "" {
+		if _, ok := session.Cookies["gr_1_deviceId"]; !ok {
+			session.Cookies["gr_1_deviceId"] = session.DeviceID
+		}
+	}
+	if session.Lat != 0 {
+		if _, ok := session.Cookies["gr_1_lat"]; !ok {
+			session.Cookies["gr_1_lat"] = fmt.Sprintf("%f", session.Lat)
+		}
+	}
+	if session.Lon != 0 {
+		if _, ok := session.Cookies["gr_1_lon"]; !ok {
+			session.Cookies["gr_1_lon"] = fmt.Sprintf("%f", session.Lon)
+		}
+	}
+	if session.Locality != "" {
+		if _, ok := session.Cookies["gr_1_locality"]; !ok {
+			session.Cookies["gr_1_locality"] = url.QueryEscape(session.Locality)
+		}
+	}
+	if session.Landmark != "" {
+		if _, ok := session.Cookies["gr_1_landmark"]; !ok {
+			session.Cookies["gr_1_landmark"] = url.QueryEscape(session.Landmark)
+		}
+	}
 }

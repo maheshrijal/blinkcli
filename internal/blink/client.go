@@ -167,36 +167,15 @@ func (c *Client) ensureCookies(ctx context.Context) error {
 	if c.Session == nil {
 		return errors.New("missing session")
 	}
-	populateDerivedCookies(c.Session)
+	config.PopulateDerivedCookies(c.Session)
 	if hasCookie(c.Session.Cookies, "__cf_bm") {
 		return nil
 	}
 	if err := c.bootstrapCookies(ctx); err != nil {
 		return err
 	}
-	populateDerivedCookies(c.Session)
+	config.PopulateDerivedCookies(c.Session)
 	return nil
-}
-
-func populateDerivedCookies(session *config.Session) {
-	if session.Cookies == nil {
-		session.Cookies = map[string]string{}
-	}
-	if session.AccessToken != "" {
-		if _, ok := session.Cookies["gr_1_accessToken"]; !ok {
-			session.Cookies["gr_1_accessToken"] = url.QueryEscape(session.AccessToken)
-		}
-	}
-	if session.Lat != 0 {
-		if _, ok := session.Cookies["gr_1_lat"]; !ok {
-			session.Cookies["gr_1_lat"] = fmt.Sprintf("%f", session.Lat)
-		}
-	}
-	if session.Lon != 0 {
-		if _, ok := session.Cookies["gr_1_lon"]; !ok {
-			session.Cookies["gr_1_lon"] = fmt.Sprintf("%f", session.Lon)
-		}
-	}
 }
 
 func (c *Client) bootstrapCookies(ctx context.Context) error {

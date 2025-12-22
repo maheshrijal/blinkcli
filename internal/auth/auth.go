@@ -156,6 +156,8 @@ func tryReadSession(ctx context.Context) (*config.Session, bool, error) {
 		if err := json.Unmarshal([]byte(locationRaw), &loc); err == nil {
 			session.Lat = loc.Coords.Lat
 			session.Lon = loc.Coords.Lon
+			session.Locality = strings.TrimSpace(loc.Coords.Locality)
+			session.Landmark = strings.TrimSpace(loc.Coords.Landmark)
 		}
 	}
 
@@ -219,6 +221,8 @@ func tryReadSession(ctx context.Context) (*config.Session, bool, error) {
 			}
 		}
 	}
+
+	config.PopulateDerivedCookies(session)
 
 	if session.AccessToken == "" || session.AuthKey == "" || session.DeviceID == "" || session.SessionID == "" {
 		// Still treat as logged in if access token exists, but caller might need to refresh.
