@@ -7,8 +7,7 @@ An **unofficial** command-line tool for Blinkit order history.
 Homebrew (once releases are published):
 
 ```bash
-brew tap maheshrijal/tap
-brew install blinkcli
+brew install maheshrijal/tap/blinkcli
 ```
 
 ## Auth (browser login)
