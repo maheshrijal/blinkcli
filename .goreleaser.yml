@@ -28,14 +28,12 @@ archives:
 checksum:
   name_template: checksums.txt
 
-homebrew_casks:
+brews:
   - name: blinkcli
-    directory: Casks
+    directory: Formula
     homepage: https://github.com/maheshrijal/blinkcli
     description: Unofficial Blinkit order tracker CLI
     license: MIT
-    binaries:
-      - blinkcli
     repository:
       owner: maheshrijal
       name: homebrew-tap
@@ -43,3 +41,7 @@ homebrew_casks:
     commit_author:
       name: Mahesh Rijal
       email: 62394512+maheshrijal@users.noreply.github.com
+    test: |
+      system "#{bin}/blinkcli", "version"
+    install: |
+      bin.install "blinkcli"
