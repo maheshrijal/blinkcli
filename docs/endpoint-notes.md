@@ -53,3 +53,10 @@ Do NOT store real tokens/cookies in the repo.
 ## Pagination / filters
 - No pagination params observed on `order_history`; scrolling did not trigger a follow-up request.
 - If large histories exist, pagination may be encoded in headers or a future payload field.
+
+## Cloudflare TLS fingerprinting (2026-10-24)
+- Same code got `403` when built with Go 1.25.5 and `200` with Go 1.27.3.
+- Cloudflare scores the TLS ClientHello fingerprint (JA4); Go 1.25's is flagged as a bot.
+  - go1.25.5: `t13d1312h2_f57a46bbacb6_ab7e3b40a677`
+  - go1.27.3: `t13d1312h2_f57a46bbacb6_f50d94e863eb`
+- Release builds must use a Go version whose fingerprint isn't blocked (see `.github/workflows/release.yml`).
