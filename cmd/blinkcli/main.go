@@ -88,11 +88,17 @@ func authCmd(args []string) {
 	}
 }
 
+// orderFetcher is implemented by both the HTTP and headless-Chrome clients.
+type orderFetcher interface {
+	OrderHistory(ctx context.Context, page, pageSize int) ([]blink.Order, error)
+}
+
 func syncCmd(args []string) {
 	flags := flag.NewFlagSet("sync", flag.ExitOnError)
 	maxPages := flags.Int("pages", 1, "max pages to fetch")
 	pageSize := flags.Int("page-size", 0, "page size if supported by the API")
 	sleepMs := flags.Int("sleep-ms", 350, "sleep between pages (ms)")
+	useHTTP := flags.Bool("http", false, "call the API directly instead of via headless Chrome")
 	_ = flags.Parse(args)
 
 	cfg, err := config.Load()
@@ -112,8 +118,18 @@ func syncCmd(args []string) {
 		fatal(err)
 	}
 
-	client := blink.NewClient(cfg.Session)
 	ctx := context.Background()
+	var client orderFetcher = blink.NewClient(cfg.Session)
+	closeClient := func() {}
+	if !*useHTTP {
+		bc, err := blink.NewBrowserClient(ctx, cfg.Session)
+		if err != nil {
+			fatal(err)
+		}
+		// Closed explicitly: fatal's os.Exit would skip a defer and orphan Chrome.
+		closeClient = bc.Close
+		client = bc
+	}
 
 	pages := *maxPages
 	if pages < 1 {
@@ -124,6 +140,7 @@ func syncCmd(args []string) {
 	for page := 1; page <= pages; page++ {
 		orders, err := client.OrderHistory(ctx, page, *pageSize)
 		if err != nil {
+			closeClient()
 			fatal(err)
 		}
 		updated, newCount := store.MergeOrders(merged, orders)
@@ -137,6 +154,8 @@ func syncCmd(args []string) {
 			time.Sleep(time.Duration(*sleepMs) * time.Millisecond)
 		}
 	}
+
+	closeClient()
 
 	if err := st.Save(merged); err != nil {
 		fatal(err)

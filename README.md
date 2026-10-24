@@ -37,10 +37,15 @@ blinkcli auth logout
 blinkcli sync
 ```
 
+Sync runs the request inside a headless Chrome tab, so Chrome/Chromium must be
+installed. Blinkit sits behind Cloudflare, which blocks non-browser HTTP clients
+by their TLS fingerprint.
+
 Optional flags:
 
 ```bash
 blinkcli sync --pages 1 --page-size 0 --sleep-ms 350
+blinkcli sync --http   # call the API directly (no Chrome; may get 403)
 ```
 
 ## View orders

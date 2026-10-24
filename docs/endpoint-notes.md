@@ -59,4 +59,8 @@ Do NOT store real tokens/cookies in the repo.
 - Cloudflare scores the TLS ClientHello fingerprint (JA4); Go 1.25's is flagged as a bot.
   - go1.25.5: `t13d1312h2_f57a46bbacb6_ab7e3b40a677`
   - go1.27.3: `t13d1312h2_f57a46bbacb6_f50d94e863eb`
-- Release builds must use a Go version whose fingerprint isn't blocked (see `.github/workflows/release.yml`).
+- Headless Chrome is challenged ("Just a moment...") while its UA says `HeadlessChrome`.
+- `sync` therefore runs `fetch()` inside a headless Chrome tab with the UA override
+  (`internal/blink/browser.go`), so the Go version no longer matters.
+- `sync --http` keeps the direct client; it only works on Go versions whose fingerprint
+  isn't blocked (see `.github/workflows/release.yml`).
