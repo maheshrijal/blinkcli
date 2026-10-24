@@ -8,6 +8,12 @@ import (
 	"blinkcli/internal/blink"
 )
 
+const (
+	first = "/v1/layout/order_history"
+	pageA = first + "?cursor=a"
+	pageB = first + "?cursor=b"
+)
+
 type fakePage struct {
 	orders []blink.Order
 	next   string
@@ -28,9 +34,9 @@ func (f *fakeFetcher) OrderHistory(_ context.Context, path string) ([]blink.Orde
 
 func TestSyncPagesFollowsNextAcrossEmptyPage(t *testing.T) {
 	f := &fakeFetcher{pages: map[string]fakePage{
-		"":   {orders: []blink.Order{{ID: "1"}}, next: "/a"},
-		"/a": {next: "/b"}, // no parseable orders, but more pages remain
-		"/b": {orders: []blink.Order{{ID: "2"}}},
+		first: {orders: []blink.Order{{ID: "1"}}, next: pageA},
+		pageA: {next: pageB}, // no parseable orders, but more pages remain
+		pageB: {orders: []blink.Order{{ID: "2"}}},
 	}}
 	merged, truncated, err := syncPages(context.Background(), f, nil, 500, 0)
 	if err != nil || truncated || len(merged) != 2 {
@@ -40,9 +46,9 @@ func TestSyncPagesFollowsNextAcrossEmptyPage(t *testing.T) {
 
 func TestSyncPagesDetectsCycle(t *testing.T) {
 	f := &fakeFetcher{pages: map[string]fakePage{
-		"":   {orders: []blink.Order{{ID: "1"}}, next: "/a"},
-		"/a": {orders: []blink.Order{{ID: "2"}}, next: "/b"},
-		"/b": {orders: []blink.Order{{ID: "3"}}, next: "/a"},
+		first: {orders: []blink.Order{{ID: "1"}}, next: pageA},
+		pageA: {orders: []blink.Order{{ID: "2"}}, next: pageB},
+		pageB: {orders: []blink.Order{{ID: "3"}}, next: pageA},
 	}}
 	_, _, err := syncPages(context.Background(), f, nil, 500, 0)
 	if err == nil || len(f.calls) != 3 {
@@ -50,10 +56,30 @@ func TestSyncPagesDetectsCycle(t *testing.T) {
 	}
 }
 
+func TestSyncPagesDetectsLoopToFirstPage(t *testing.T) {
+	f := &fakeFetcher{pages: map[string]fakePage{
+		first: {orders: []blink.Order{{ID: "1"}}, next: first},
+	}}
+	_, _, err := syncPages(context.Background(), f, nil, 500, 0)
+	if err == nil || len(f.calls) != 1 {
+		t.Fatalf("err=%v calls=%d, want loop error after 1 call", err, len(f.calls))
+	}
+}
+
+func TestSyncPagesRejectsForeignNextURL(t *testing.T) {
+	f := &fakeFetcher{pages: map[string]fakePage{
+		first: {orders: []blink.Order{{ID: "1"}}, next: "/v1/user/logout"},
+	}}
+	merged, _, err := syncPages(context.Background(), f, nil, 500, 0)
+	if err == nil || len(f.calls) != 1 || len(merged) != 1 {
+		t.Fatalf("err=%v calls=%d merged=%d, want error, 1 call, 1 order", err, len(f.calls), len(merged))
+	}
+}
+
 func TestSyncPagesKeepsProgressOnError(t *testing.T) {
 	f := &fakeFetcher{pages: map[string]fakePage{
-		"":   {orders: []blink.Order{{ID: "1"}}, next: "/a"},
-		"/a": {err: errors.New("boom")},
+		first: {orders: []blink.Order{{ID: "1"}}, next: pageA},
+		pageA: {err: errors.New("boom")},
 	}}
 	merged, _, err := syncPages(context.Background(), f, nil, 500, 0)
 	if err == nil || len(merged) != 1 {
@@ -61,9 +87,21 @@ func TestSyncPagesKeepsProgressOnError(t *testing.T) {
 	}
 }
 
+func TestSyncPagesStopsOnCancel(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	f := &fakeFetcher{pages: map[string]fakePage{
+		first: {orders: []blink.Order{{ID: "1"}}, next: pageA},
+	}}
+	merged, _, err := syncPages(ctx, f, nil, 500, 0)
+	if !errors.Is(err, context.Canceled) || len(merged) != 1 || len(f.calls) != 1 {
+		t.Fatalf("err=%v merged=%d calls=%d, want canceled, 1, 1", err, len(merged), len(f.calls))
+	}
+}
+
 func TestSyncPagesStopsAtLimit(t *testing.T) {
 	f := &fakeFetcher{pages: map[string]fakePage{
-		"": {orders: []blink.Order{{ID: "1"}}, next: "/a"},
+		first: {orders: []blink.Order{{ID: "1"}}, next: pageA},
 	}}
 	_, truncated, err := syncPages(context.Background(), f, nil, 1, 0)
 	if err != nil || !truncated || len(f.calls) != 1 {

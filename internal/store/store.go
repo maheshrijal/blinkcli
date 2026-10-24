@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"blinkcli/internal/blink"
 	"blinkcli/internal/config"
@@ -112,7 +113,8 @@ func mergeOrder(prev, next blink.Order) blink.Order {
 	if next.AmountRupees == 0 {
 		next.AmountRupees = prev.AmountRupees
 	}
-	if next.Date.IsZero() {
+	// Older-year dates lose their time ("19 Oct 2025"); keep the stored precise one.
+	if next.Date.IsZero() || (sameDay(prev.Date, next.Date) && isMidnight(next.Date) && !isMidnight(prev.Date)) {
 		next.Date = prev.Date
 	}
 	if next.RawDate == "" {
@@ -124,6 +126,18 @@ func mergeOrder(prev, next blink.Order) blink.Order {
 	return next
 }
 
+func sameDay(a, b time.Time) bool {
+	if a.IsZero() || b.IsZero() {
+		return false
+	}
+	b = b.In(a.Location())
+	return a.Year() == b.Year() && a.YearDay() == b.YearDay()
+}
+
+func isMidnight(t time.Time) bool {
+	return t.Hour() == 0 && t.Minute() == 0
+}
+
 func orderKey(order blink.Order) string {
 	if order.ID != "" {
 		return "id:" + order.ID
@@ -131,11 +145,12 @@ func orderKey(order blink.Order) string {
 	if order.CartID != "" {
 		return "cart:" + order.CartID
 	}
-	// RawDate is excluded: it drifts ("Today, ..." becomes "24 Oct, ...").
+	// Day granularity, not RawDate or time: both drift ("Today, 10:54 am" ->
+	// "24 Oct, 10:54 am" -> "24 Oct 2026" at midnight).
 	if !order.Date.IsZero() || order.AmountRupees != 0 || order.Title != "" || len(order.Items) > 0 {
 		return strings.Join([]string{
 			"fallback",
-			order.Date.Format("2006-01-02 15:04"),
+			order.Date.Format("2006-01-02"),
 			strconvAmount(order.AmountRupees),
 			order.Title,
 			strings.Join(order.Items, "|"),

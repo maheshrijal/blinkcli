@@ -68,7 +68,7 @@ func (c *Client) OrderHistory(ctx context.Context, path string) ([]Order, string
 	if c.Session == nil {
 		return nil, "", errors.New("missing session")
 	}
-	path, err := pagePath(path)
+	path, err := PagePath(path)
 	if err != nil {
 		return nil, "", err
 	}
@@ -127,19 +127,31 @@ func apiHeaders(session *config.Session) map[string]string {
 	return h
 }
 
-// pagePath defaults to the first page and rejects non-relative next_url values,
-// so session headers are never sent off blinkit.com.
-func pagePath(path string) (string, error) {
-	if path == "" {
+// PagePath normalizes a next_url to an order_history path on blinkit.com ("" = first page).
+// Anything else is rejected so session headers never reach another host or endpoint.
+func PagePath(raw string) (string, error) {
+	if raw == "" {
 		return orderHistoryPath, nil
 	}
+	bad := fmt.Errorf("unexpected pagination url %q", raw)
 	// Browsers treat a backslash like "/", so "/\evil.example" would resolve off-origin.
-	u, err := url.Parse(path)
-	if err != nil || u.Scheme != "" || u.Host != "" || !strings.HasPrefix(path, "/") ||
-		strings.HasPrefix(path, "//") || strings.ContainsRune(path, '\\') {
-		return "", fmt.Errorf("unexpected pagination url %q", path)
+	if strings.ContainsRune(raw, '\\') || strings.HasPrefix(raw, "//") {
+		return "", bad
 	}
-	return path, nil
+	u, err := url.Parse(raw)
+	if err != nil || u.User != nil {
+		return "", bad
+	}
+	if (u.Scheme != "" || u.Host != "") && (u.Scheme != "https" || u.Host != "blinkit.com") {
+		return "", bad
+	}
+	if u.Path != orderHistoryPath {
+		return "", bad
+	}
+	if u.RawQuery == "" {
+		return u.Path, nil
+	}
+	return u.Path + "?" + u.RawQuery, nil
 }
 
 func applyHeaders(req *http.Request, session *config.Session) {

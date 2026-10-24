@@ -211,6 +211,10 @@ func ParseDate(input string, now time.Time) (time.Time, error) {
 	monthStr := match[2]
 	yearStr := match[3]
 	timeStr := strings.TrimSpace(match[4])
+	// Without a year or a time the year is a guess; refuse rather than misfile it.
+	if yearStr == "" && timeStr == "" {
+		return time.Time{}, errors.New("date has neither year nor time")
+	}
 
 	monthTime, err := time.Parse("Jan", monthStr)
 	if err != nil {

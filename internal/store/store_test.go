@@ -71,3 +71,28 @@ func TestMergeOrdersFallbackKeyIgnoresRawDateDrift(t *testing.T) {
 		t.Fatalf("newCount=%d len=%d, want 0 and 1", newCount, len(merged))
 	}
 }
+
+// At year rollover "19 Oct, 7:56 pm" becomes "19 Oct 2025" (midnight); keep the time.
+func TestMergeOrdersKeepsTimeAtYearRollover(t *testing.T) {
+	precise := time.Date(2025, 10, 19, 19, 56, 0, 0, time.UTC)
+	midnight := time.Date(2025, 10, 19, 0, 0, 0, 0, time.UTC)
+	merged, _ := MergeOrders(
+		[]blink.Order{{ID: "1", Date: precise}},
+		[]blink.Order{{ID: "1", Date: midnight, RawDate: "19 Oct 2025"}},
+	)
+	if !merged[0].Date.Equal(precise) || merged[0].RawDate != "19 Oct 2025" {
+		t.Fatalf("got %+v, want precise time kept and fresh RawDate", merged[0])
+	}
+}
+
+func TestMergeOrdersFallbackKeyStableAtYearRollover(t *testing.T) {
+	precise := time.Date(2025, 10, 19, 19, 56, 0, 0, time.UTC)
+	midnight := time.Date(2025, 10, 19, 0, 0, 0, 0, time.UTC)
+	merged, newCount := MergeOrders(
+		[]blink.Order{{Date: precise, AmountRupees: 50}},
+		[]blink.Order{{Date: midnight, AmountRupees: 50}},
+	)
+	if newCount != 0 || len(merged) != 1 {
+		t.Fatalf("newCount=%d len=%d, want 0 and 1", newCount, len(merged))
+	}
+}

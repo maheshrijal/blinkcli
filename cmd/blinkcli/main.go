@@ -2,9 +2,12 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"blinkcli/internal/auth"
@@ -102,6 +105,9 @@ func syncCmd(args []string) {
 	useHTTP := flags.Bool("http", false, "call the API directly instead of via headless Chrome")
 	_ = flags.Int("page-size", 0, "deprecated: ignored by the API")
 	_ = flags.Parse(args)
+	if *maxPages < 0 {
+		fatal(fmt.Errorf("--pages must be >= 0"))
+	}
 
 	cfg, err := config.Load()
 	if err != nil {
@@ -120,7 +126,9 @@ func syncCmd(args []string) {
 		fatal(err)
 	}
 
-	ctx := context.Background()
+	// Ctrl-C cancels ctx: chromedp kills Chrome, and progress so far is saved below.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 	var client orderFetcher = blink.NewClient(cfg.Session)
 	closeClient := func() {}
 	if !*useHTTP {
@@ -133,7 +141,7 @@ func syncCmd(args []string) {
 		client = bc
 	}
 
-	// Hard cap guards against a pagination loop.
+	// Hard cap guards against runaway pagination.
 	pages := maxSyncPages
 	if *maxPages > maxSyncPages {
 		fmt.Fprintf(os.Stderr, "Warning: --pages capped at %d.\n", maxSyncPages)
@@ -148,11 +156,18 @@ func syncCmd(args []string) {
 	if err := st.Save(merged); err != nil {
 		fatal(err)
 	}
+	if errors.Is(syncErr, context.Canceled) {
+		syncErr = errors.New("interrupted")
+	}
 	if syncErr != nil {
-		fatal(fmt.Errorf("%w (saved %d orders fetched so far)", syncErr, len(merged)))
+		fatal(fmt.Errorf("%w (progress saved; %d orders stored)", syncErr, len(merged)))
 	}
 	if truncated {
-		fmt.Printf("Stopped at the --pages limit (%d); more history remains.\n", pages)
+		if *maxPages > 0 && *maxPages <= maxSyncPages {
+			fmt.Printf("Stopped at the --pages limit (%d); more history remains.\n", pages)
+		} else {
+			fmt.Printf("Stopped at the %d-page safety cap; more history remains.\n", pages)
+		}
 	}
 	fmt.Printf("Sync complete. Stored %d orders.\n", len(merged))
 }
@@ -161,7 +176,8 @@ func syncCmd(args []string) {
 // orders merged so far even on error, and whether it stopped at the page limit.
 func syncPages(ctx context.Context, client orderFetcher, existing []blink.Order, pages int, sleep time.Duration) ([]blink.Order, bool, error) {
 	merged := existing
-	path := ""
+	path, _ := blink.PagePath("")
+	// Keyed by normalized path so a next_url back to page 1 counts as a loop.
 	visited := map[string]bool{}
 	for page := 1; ; page++ {
 		visited[path] = true
@@ -177,6 +193,10 @@ func syncPages(ctx context.Context, client orderFetcher, existing []blink.Order,
 		if next == "" {
 			return merged, false, nil
 		}
+		next, err = blink.PagePath(next)
+		if err != nil {
+			return merged, false, err
+		}
 		if visited[next] {
 			return merged, false, fmt.Errorf("pagination loop at page %d", page)
 		}
@@ -184,7 +204,14 @@ func syncPages(ctx context.Context, client orderFetcher, existing []blink.Order,
 			return merged, true, nil
 		}
 		path = next
-		time.Sleep(sleep)
+		if err := ctx.Err(); err != nil {
+			return merged, false, err
+		}
+		select {
+		case <-ctx.Done():
+			return merged, false, ctx.Err()
+		case <-time.After(sleep):
+		}
 	}
 }
 

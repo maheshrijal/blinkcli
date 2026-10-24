@@ -100,7 +100,7 @@ func (b *BrowserClient) open() error {
 
 // OrderHistory fetches one page from inside the page; see Client.OrderHistory.
 func (b *BrowserClient) OrderHistory(_ context.Context, path string) ([]Order, string, error) {
-	path, err := pagePath(path)
+	path, err := PagePath(path)
 	if err != nil {
 		return nil, "", err
 	}

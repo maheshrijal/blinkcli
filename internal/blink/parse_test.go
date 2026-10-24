@@ -56,6 +56,14 @@ func TestParseDateAnchorsToIST(t *testing.T) {
 	}
 }
 
+func TestParseDateRejectsBareDayMonth(t *testing.T) {
+	for _, in := range []string{"19 Oct", "19 Oct,"} {
+		if _, err := ParseDate(in, time.Now()); err == nil {
+			t.Errorf("ParseDate(%q) accepted a date with neither year nor time", in)
+		}
+	}
+}
+
 func TestParseAmountRupees(t *testing.T) {
 	amount, err := ParseAmountRupees("₹1,234")
 	if err != nil {
