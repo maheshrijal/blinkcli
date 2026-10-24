@@ -133,7 +133,10 @@ func pagePath(path string) (string, error) {
 	if path == "" {
 		return orderHistoryPath, nil
 	}
-	if !strings.HasPrefix(path, "/") || strings.HasPrefix(path, "//") {
+	// Browsers treat a backslash like "/", so "/\evil.example" would resolve off-origin.
+	u, err := url.Parse(path)
+	if err != nil || u.Scheme != "" || u.Host != "" || !strings.HasPrefix(path, "/") ||
+		strings.HasPrefix(path, "//") || strings.ContainsRune(path, '\\') {
 		return "", fmt.Errorf("unexpected pagination url %q", path)
 	}
 	return path, nil

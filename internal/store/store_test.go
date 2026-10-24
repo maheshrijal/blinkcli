@@ -48,3 +48,26 @@ func TestMergeOrdersPrefersIncoming(t *testing.T) {
 		}
 	}
 }
+
+func TestMergeOrdersKeepsGoodFieldsOnParseFailure(t *testing.T) {
+	good := time.Date(2026, 10, 9, 9, 32, 0, 0, time.UTC)
+	existing := []blink.Order{{ID: "1", Date: good, AmountRupees: 228, Items: []string{"Bread"}}}
+	incoming := []blink.Order{{ID: "1", Status: "DELIVERED"}} // date/amount/items failed to parse
+
+	merged, _ := MergeOrders(existing, incoming)
+	o := merged[0]
+	if !o.Date.Equal(good) || o.AmountRupees != 228 || len(o.Items) != 1 || o.Status != "DELIVERED" {
+		t.Fatalf("good fields lost or fresh field dropped: %+v", o)
+	}
+}
+
+func TestMergeOrdersFallbackKeyIgnoresRawDateDrift(t *testing.T) {
+	d := time.Date(2026, 10, 24, 10, 54, 0, 0, time.UTC)
+	existing := []blink.Order{{RawDate: "Today, 10:54 am", Date: d, AmountRupees: 50}}
+	incoming := []blink.Order{{RawDate: "24 Oct, 10:54 am", Date: d, AmountRupees: 50}}
+
+	merged, newCount := MergeOrders(existing, incoming)
+	if newCount != 0 || len(merged) != 1 {
+		t.Fatalf("newCount=%d len=%d, want 0 and 1", newCount, len(merged))
+	}
+}

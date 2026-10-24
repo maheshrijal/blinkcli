@@ -43,6 +43,19 @@ func TestParseDateFormats(t *testing.T) {
 	}
 }
 
+// A machine in UTC at 20:00 Oct 23 is already Oct 24 in IST, where Blinkit's "Today" lives.
+func TestParseDateAnchorsToIST(t *testing.T) {
+	now := time.Date(2026, 10, 23, 20, 0, 0, 0, time.UTC)
+	got, err := ParseDate("Today, 12:30 am", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := time.Date(2026, 10, 24, 0, 30, 0, 0, ist)
+	if !got.Equal(want) {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+}
+
 func TestParseAmountRupees(t *testing.T) {
 	amount, err := ParseAmountRupees("₹1,234")
 	if err != nil {

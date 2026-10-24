@@ -73,11 +73,11 @@ func MergeOrders(existing, incoming []blink.Order) ([]blink.Order, int) {
 			key = fmt.Sprintf("unknown-incoming-%d", unknownIncoming)
 			unknownIncoming++
 		}
-		// Fresh data wins so re-syncs repair stale fields (e.g. unparsed dates).
-		if _, ok := seen[key]; !ok {
+		prev, ok := seen[key]
+		if !ok {
 			newCount++
 		}
-		seen[key] = order
+		seen[key] = mergeOrder(prev, order)
 	}
 
 	merged := make([]blink.Order, 0, len(seen))
@@ -97,6 +97,33 @@ func MergeOrders(existing, incoming []blink.Order) ([]blink.Order, int) {
 	return merged, newCount
 }
 
+// mergeOrder prefers fresh fields but keeps stored ones the fresh parse left empty,
+// so re-syncs repair stale data without a parse failure wiping good data.
+func mergeOrder(prev, next blink.Order) blink.Order {
+	if next.CartID == "" {
+		next.CartID = prev.CartID
+	}
+	if next.Status == "" {
+		next.Status = prev.Status
+	}
+	if next.Title == "" {
+		next.Title = prev.Title
+	}
+	if next.AmountRupees == 0 {
+		next.AmountRupees = prev.AmountRupees
+	}
+	if next.Date.IsZero() {
+		next.Date = prev.Date
+	}
+	if next.RawDate == "" {
+		next.RawDate = prev.RawDate
+	}
+	if len(next.Items) == 0 {
+		next.Items = prev.Items
+	}
+	return next
+}
+
 func orderKey(order blink.Order) string {
 	if order.ID != "" {
 		return "id:" + order.ID
@@ -104,13 +131,13 @@ func orderKey(order blink.Order) string {
 	if order.CartID != "" {
 		return "cart:" + order.CartID
 	}
-	if !order.Date.IsZero() || order.AmountRupees != 0 || order.Title != "" || order.RawDate != "" || len(order.Items) > 0 {
+	// RawDate is excluded: it drifts ("Today, ..." becomes "24 Oct, ...").
+	if !order.Date.IsZero() || order.AmountRupees != 0 || order.Title != "" || len(order.Items) > 0 {
 		return strings.Join([]string{
 			"fallback",
 			order.Date.Format("2006-01-02 15:04"),
 			strconvAmount(order.AmountRupees),
 			order.Title,
-			order.RawDate,
 			strings.Join(order.Items, "|"),
 		}, ":")
 	}

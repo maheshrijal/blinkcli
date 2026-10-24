@@ -17,7 +17,7 @@ func TestPagePath(t *testing.T) {
 	if p, err := pagePath("/v1/layout/order_history?cursor=x"); err != nil || p != "/v1/layout/order_history?cursor=x" {
 		t.Fatalf("relative path rejected: %q %v", p, err)
 	}
-	for _, bad := range []string{"https://evil.example/x", "//evil.example/x"} {
+	for _, bad := range []string{"https://evil.example/x", "//evil.example/x", `/\evil.example/x`, `\\evil.example/x`, "javascript:alert(1)"} {
 		if _, err := pagePath(bad); err == nil {
 			t.Fatalf("expected %q to be rejected", bad)
 		}

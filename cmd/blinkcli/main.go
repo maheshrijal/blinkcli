@@ -100,6 +100,7 @@ func syncCmd(args []string) {
 	maxPages := flags.Int("pages", 0, "max pages to fetch (0 = all)")
 	sleepMs := flags.Int("sleep-ms", 350, "sleep between pages (ms)")
 	useHTTP := flags.Bool("http", false, "call the API directly instead of via headless Chrome")
+	_ = flags.Int("page-size", 0, "deprecated: ignored by the API")
 	_ = flags.Parse(args)
 
 	cfg, err := config.Load()
@@ -134,35 +135,57 @@ func syncCmd(args []string) {
 
 	// Hard cap guards against a pagination loop.
 	pages := maxSyncPages
-	if *maxPages > 0 && *maxPages < pages {
+	if *maxPages > maxSyncPages {
+		fmt.Fprintf(os.Stderr, "Warning: --pages capped at %d.\n", maxSyncPages)
+	} else if *maxPages > 0 {
 		pages = *maxPages
 	}
 
+	merged, truncated, syncErr := syncPages(ctx, client, existing, pages, time.Duration(*sleepMs)*time.Millisecond)
+	closeClient()
+
+	// Save progress even on error so a later page failure doesn't discard earlier pages.
+	if err := st.Save(merged); err != nil {
+		fatal(err)
+	}
+	if syncErr != nil {
+		fatal(fmt.Errorf("%w (saved %d orders fetched so far)", syncErr, len(merged)))
+	}
+	if truncated {
+		fmt.Printf("Stopped at the --pages limit (%d); more history remains.\n", pages)
+	}
+	fmt.Printf("Sync complete. Stored %d orders.\n", len(merged))
+}
+
+// syncPages follows next_url until exhausted or pages is reached. It returns the
+// orders merged so far even on error, and whether it stopped at the page limit.
+func syncPages(ctx context.Context, client orderFetcher, existing []blink.Order, pages int, sleep time.Duration) ([]blink.Order, bool, error) {
 	merged := existing
 	path := ""
-	for page := 1; page <= pages; page++ {
+	visited := map[string]bool{}
+	for page := 1; ; page++ {
+		visited[path] = true
 		orders, next, err := client.OrderHistory(ctx, path)
 		if err != nil {
-			closeClient()
-			fatal(err)
+			return merged, false, fmt.Errorf("page %d: %w", page, err)
 		}
 		updated, newCount := store.MergeOrders(merged, orders)
 		fmt.Printf("Page %d: fetched %d orders, new %d\n", page, len(orders), newCount)
 		merged = updated
 
-		if next == "" || next == path || len(orders) == 0 {
-			break
+		// next_url alone decides the end; a page may hold no parseable orders.
+		if next == "" {
+			return merged, false, nil
+		}
+		if visited[next] {
+			return merged, false, fmt.Errorf("pagination loop at page %d", page)
+		}
+		if page >= pages {
+			return merged, true, nil
 		}
 		path = next
-		time.Sleep(time.Duration(*sleepMs) * time.Millisecond)
+		time.Sleep(sleep)
 	}
-
-	closeClient()
-
-	if err := st.Save(merged); err != nil {
-		fatal(err)
-	}
-	fmt.Printf("Sync complete. Stored %d orders.\n", len(merged))
 }
 
 func ordersCmd() {

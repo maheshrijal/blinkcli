@@ -180,6 +180,7 @@ func parseDeeplink(raw, fallbackOrderID string) (string, string) {
 }
 
 var (
+	ist        = time.FixedZone("IST", 5*3600+1800) // India has no DST
 	dateRe     = regexp.MustCompile(`^(\d{1,2})\s([A-Za-z]{3})(?:,)?\s*(\d{4})?,?\s*(\d{1,2}:\d{2}\s?[ap]m)?$`)
 	relativeRe = regexp.MustCompile(`^(?i)(today|yesterday),?\s*(\d{1,2}:\d{2}\s?[ap]m)$`)
 )
@@ -187,6 +188,8 @@ var (
 // ParseDate parses Blinkit order dates: "Today, 10:54 am", "Yesterday, 9:00 pm",
 // "19 Oct, 7:56 pm" (current year) and "19 Oct 2025" (older years, no time).
 func ParseDate(input string, now time.Time) (time.Time, error) {
+	// Blinkit renders dates in IST; anchor there so "Today" is the right day anywhere.
+	now = now.In(ist)
 	input = strings.TrimSpace(input)
 	if match := relativeRe.FindStringSubmatch(input); match != nil {
 		parsedTime, err := time.Parse("3:04 pm", strings.ToLower(strings.TrimSpace(match[2])))
