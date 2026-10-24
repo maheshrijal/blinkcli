@@ -171,3 +171,19 @@ func TestStoreSaveRejectsBrokenSymlink(t *testing.T) {
 		t.Fatal("broken symlink was replaced by a regular file")
 	}
 }
+
+func TestStoreSaveKeepsExistingMode(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "orders.json")
+	if err := os.WriteFile(path, []byte("[]"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(path, 0o640); err != nil {
+		t.Fatal(err)
+	}
+	if err := (&Store{Path: path}).Save([]blink.Order{{ID: "1"}}); err != nil {
+		t.Fatal(err)
+	}
+	if fi, _ := os.Stat(path); fi.Mode().Perm() != 0o640 {
+		t.Fatalf("mode = %v, want 0640", fi.Mode().Perm())
+	}
+}

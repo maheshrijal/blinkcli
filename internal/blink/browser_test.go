@@ -17,6 +17,7 @@ func TestPagePath(t *testing.T) {
 		"https://blinkit.com/v1/layout/order_history?cursor=x":     "/v1/layout/order_history?cursor=x",
 		"https://www.blinkit.com/v1/layout/order_history?cursor=x": "/v1/layout/order_history?cursor=x",
 		"https://blinkit.com:443/v1/layout/order_history":          "/v1/layout/order_history",
+		"https://Blinkit.COM/v1/layout/order_history":              "/v1/layout/order_history",
 	}
 	for in, want := range good {
 		if got, err := PagePath(in); err != nil || got != want {

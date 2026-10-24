@@ -141,7 +141,7 @@ func PagePath(raw string) (string, error) {
 		return "", bad
 	}
 	if u.Scheme != "" || u.Host != "" {
-		host := u.Hostname()
+		host := strings.ToLower(u.Hostname())
 		if u.Scheme != "https" || (host != "blinkit.com" && host != "www.blinkit.com") || (u.Port() != "" && u.Port() != "443") {
 			return "", bad
 		}

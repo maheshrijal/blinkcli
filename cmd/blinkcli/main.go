@@ -164,7 +164,11 @@ func syncCmd(args []string) {
 	}
 	// A killed Chrome may surface a non-context error, so check the signal itself.
 	if syncErr != nil && interrupted {
-		syncErr = errors.New("interrupted")
+		if errors.Is(syncErr, context.Canceled) {
+			syncErr = errors.New("interrupted")
+		} else {
+			syncErr = fmt.Errorf("interrupted: %w", syncErr)
+		}
 	}
 	if syncErr != nil {
 		fatal(fmt.Errorf("%w (progress saved; %d orders stored)", syncErr, len(merged)))

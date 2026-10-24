@@ -21,6 +21,7 @@ const (
 	// Title of Cloudflare's interstitial challenge page.
 	challengeTitle   = "Just a moment"
 	challengeTimeout = 20 * time.Second
+	fetchTimeout     = 30 * time.Second
 )
 
 // fetchJS runs inside the blinkit.com page so the request uses Chrome's own
@@ -110,8 +111,11 @@ func (b *BrowserClient) OrderHistory(_ context.Context, path string) ([]Order, s
 	}
 	expr := fetchJS + "(..." + string(args) + ")"
 
+	// Bound each page like the HTTP client's timeout so a stalled fetch can't hang sync.
+	ctx, cancel := context.WithTimeout(b.ctx, fetchTimeout)
+	defer cancel()
 	var raw string
-	if err := chromedp.Run(b.ctx, chromedp.Evaluate(expr, &raw, func(p *runtime.EvaluateParams) *runtime.EvaluateParams {
+	if err := chromedp.Run(ctx, chromedp.Evaluate(expr, &raw, func(p *runtime.EvaluateParams) *runtime.EvaluateParams {
 		return p.WithAwaitPromise(true)
 	})); err != nil {
 		return nil, "", err

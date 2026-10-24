@@ -63,6 +63,13 @@ func (s *Store) Save(orders []blink.Order) error {
 		return err
 	}
 	defer os.Remove(tmp.Name())
+	// Keep an existing file's mode; new files stay at CreateTemp's 0600.
+	if fi, err := os.Stat(path); err == nil {
+		if err := tmp.Chmod(fi.Mode().Perm()); err != nil {
+			tmp.Close()
+			return err
+		}
+	}
 	if _, err := tmp.Write(data); err != nil {
 		tmp.Close()
 		return err
@@ -77,13 +84,12 @@ func (s *Store) Save(orders []blink.Order) error {
 	if err := os.Rename(tmp.Name(), path); err != nil {
 		return err
 	}
-	// fsync the directory so the rename itself survives a crash.
-	dir, err := os.Open(filepath.Dir(path))
-	if err != nil {
-		return err
+	// Best-effort directory fsync for rename durability; some filesystems don't support it.
+	if dir, err := os.Open(filepath.Dir(path)); err == nil {
+		_ = dir.Sync()
+		dir.Close()
 	}
-	defer dir.Close()
-	return dir.Sync()
+	return nil
 }
 
 // MergeOrders merges incoming orders into existing ones, returning the merged list and new count.
