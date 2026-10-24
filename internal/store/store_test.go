@@ -1,6 +1,7 @@
 package store
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -110,5 +111,27 @@ func TestMergeOrdersRolloverWithLegacyZone(t *testing.T) {
 	want := time.Date(2025, 10, 19, 19, 56, 0, 0, ist)
 	if !merged[0].Date.Equal(want) {
 		t.Fatalf("got %v, want %v (stored time kept, relabeled IST)", merged[0].Date, want)
+	}
+}
+
+func TestStoreSaveIsAtomic(t *testing.T) {
+	dir := t.TempDir()
+	st := &Store{Path: filepath.Join(dir, "orders.json")}
+	if err := st.Save([]blink.Order{{ID: "1"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Save([]blink.Order{{ID: "1"}, {ID: "2"}}); err != nil {
+		t.Fatal(err)
+	}
+	entries, _ := os.ReadDir(dir)
+	if len(entries) != 1 {
+		t.Fatalf("expected only orders.json, found %d entries (temp file leaked?)", len(entries))
+	}
+	info, _ := os.Stat(st.Path)
+	if info.Mode().Perm() != 0o600 {
+		t.Fatalf("perm = %v, want 0600", info.Mode().Perm())
+	}
+	if got, _ := st.Load(); len(got) != 2 {
+		t.Fatalf("loaded %d orders, want 2", len(got))
 	}
 }

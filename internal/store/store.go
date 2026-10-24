@@ -50,7 +50,24 @@ func (s *Store) Save(orders []blink.Order) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(s.Path, data, 0o600)
+	// Temp file + rename: an interrupted save never leaves a truncated orders.json.
+	tmp, err := os.CreateTemp(filepath.Dir(s.Path), ".orders-*.json")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(tmp.Name())
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Chmod(0o600); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmp.Name(), s.Path)
 }
 
 // MergeOrders merges incoming orders into existing ones, returning the merged list and new count.
@@ -98,8 +115,7 @@ func MergeOrders(existing, incoming []blink.Order) ([]blink.Order, int) {
 	return merged, newCount
 }
 
-// mergeOrder prefers fresh fields but keeps stored ones the fresh parse left empty,
-// so re-syncs repair stale data without a parse failure wiping good data.
+// mergeOrder prefers fresh fields but keeps stored ones a failed parse left empty.
 func mergeOrder(prev, next blink.Order) blink.Order {
 	if next.CartID == "" {
 		next.CartID = prev.CartID
@@ -129,8 +145,7 @@ func mergeOrder(prev, next blink.Order) blink.Order {
 	return next
 }
 
-// sameDay compares wall-clock dates; legacy dates were stored in the machine's zone
-// but always hold Blinkit's IST wall-clock values, so no zone conversion.
+// sameDay compares wall-clock dates (legacy rows hold IST values in the local zone).
 func sameDay(a, b time.Time) bool {
 	if a.IsZero() || b.IsZero() {
 		return false
@@ -149,8 +164,7 @@ func orderKey(order blink.Order) string {
 	if order.CartID != "" {
 		return "cart:" + order.CartID
 	}
-	// Best effort only: without an ID there is no stable identity. RawDate drifts
-	// ("Today, ..." -> "24 Oct, ..."), so it is used only when the date didn't parse.
+	// Best effort without an ID; RawDate drifts, so use it only if the date didn't parse.
 	if !order.Date.IsZero() || order.AmountRupees != 0 || order.Title != "" || order.RawDate != "" || len(order.Items) > 0 {
 		rawDate := ""
 		if order.Date.IsZero() {

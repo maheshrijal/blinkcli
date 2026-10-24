@@ -146,11 +146,9 @@ func syncCmd(args []string) {
 		client = bc
 	}
 
-	// Hard cap guards against runaway pagination.
+	// Safety cap applies only when --pages is unset; an explicit value is honored.
 	pages := maxSyncPages
-	if *maxPages > maxSyncPages {
-		fmt.Fprintf(os.Stderr, "Warning: --pages capped at %d.\n", maxSyncPages)
-	} else if *maxPages > 0 {
+	if *maxPages > 0 {
 		pages = *maxPages
 	}
 
@@ -162,24 +160,24 @@ func syncCmd(args []string) {
 	if err := st.Save(merged); err != nil {
 		fatal(err)
 	}
-	if errors.Is(syncErr, context.Canceled) {
+	// A killed Chrome may surface a non-context error, so check ctx itself.
+	if syncErr != nil && ctx.Err() != nil {
 		syncErr = errors.New("interrupted")
 	}
 	if syncErr != nil {
 		fatal(fmt.Errorf("%w (progress saved; %d orders stored)", syncErr, len(merged)))
 	}
 	if truncated {
-		if *maxPages > 0 && *maxPages <= maxSyncPages {
+		if *maxPages > 0 {
 			fmt.Printf("Stopped at the --pages limit (%d); more history remains.\n", pages)
 		} else {
-			fmt.Printf("Stopped at the %d-page safety cap; more history remains.\n", pages)
+			fmt.Printf("Stopped at the %d-page safety cap; use --pages to go further.\n", pages)
 		}
 	}
 	fmt.Printf("Sync complete. Stored %d orders.\n", len(merged))
 }
 
-// syncPages follows next_url until exhausted or pages is reached. It returns the
-// orders merged so far even on error, and whether it stopped at the page limit.
+// syncPages follows next_url up to pages; returns progress even on error, and whether it hit the limit.
 func syncPages(ctx context.Context, client orderFetcher, existing []blink.Order, pages int, sleep time.Duration) ([]blink.Order, bool, error) {
 	merged := existing
 	path, _ := blink.PagePath("")

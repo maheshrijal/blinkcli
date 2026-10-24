@@ -62,8 +62,7 @@ func (c *Client) OrderCount(ctx context.Context) (OrderCount, error) {
 	return parseOrderCount(body, c.Session.UserID)
 }
 
-// OrderHistory fetches one page of order history and returns the next page path.
-// Pass "" for the first page, then the returned path until it is "".
+// OrderHistory fetches one page ("" = first) and returns the next page path ("" = last).
 func (c *Client) OrderHistory(ctx context.Context, path string) ([]Order, string, error) {
 	if c.Session == nil {
 		return nil, "", errors.New("missing session")
@@ -127,8 +126,7 @@ func apiHeaders(session *config.Session) map[string]string {
 	return h
 }
 
-// PagePath normalizes a next_url to an order_history path on blinkit.com ("" = first page).
-// Anything else is rejected so session headers never reach another host or endpoint.
+// PagePath allows only blinkit.com order_history URLs, so session headers stay on that endpoint.
 func PagePath(raw string) (string, error) {
 	if raw == "" {
 		return orderHistoryPath, nil

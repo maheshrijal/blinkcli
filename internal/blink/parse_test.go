@@ -30,6 +30,8 @@ func TestParseDateFormats(t *testing.T) {
 		{"04 Jan, 7:35 pm", time.Date(2026, 1, 4, 19, 35, 0, 0, ist)},
 		{"19 Oct 2025", time.Date(2025, 10, 19, 0, 0, 0, 0, ist)},
 		{"26 Jun 2024", time.Date(2024, 6, 26, 0, 0, 0, 0, ist)},
+		{"Yesterday, 9:00pm", time.Date(2026, 10, 23, 21, 0, 0, 0, ist)},
+		{"09 Oct, 9:32AM", time.Date(2026, 10, 9, 9, 32, 0, 0, ist)},
 	}
 	for _, tc := range cases {
 		got, err := ParseDate(tc.in, now)
