@@ -74,15 +74,11 @@ func (c *Client) OrderHistory(ctx context.Context, page, pageSize int) ([]Order,
 		return nil, err
 	}
 	var body io.Reader
-	if pageSize > 0 || page > 1 {
-		payload := map[string]int{
-			"page":      page,
-			"page_size": pageSize,
-		}
-		buf, err := json.Marshal(payload)
-		if err != nil {
-			return nil, err
-		}
+	buf, err := orderHistoryBody(page, pageSize)
+	if err != nil {
+		return nil, err
+	}
+	if buf != nil {
 		body = bytes.NewReader(buf)
 	}
 
@@ -110,41 +106,51 @@ func (c *Client) OrderHistory(ctx context.Context, page, pageSize int) ([]Order,
 	return ParseOrderHistory(respBody, time.Now())
 }
 
-func applyHeaders(req *http.Request, session *config.Session) {
-	req.Header.Set("Accept", "application/json")
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("app_client", "consumer_web")
-	req.Header.Set("platform", "desktop_web")
-	req.Header.Set("x-age-consent-granted", "false")
-	req.Header.Set("origin", baseURL)
-	req.Header.Set("referer", baseURL+"/account/orders")
-	if session.AccessToken != "" {
-		req.Header.Set("access_token", session.AccessToken)
+// apiHeaders returns the Blinkit app headers derived from the session.
+// Browser-controlled headers (origin, referer, user-agent, cookie) are excluded.
+func apiHeaders(session *config.Session) map[string]string {
+	h := map[string]string{
+		"Accept":                "application/json",
+		"Content-Type":          "application/json",
+		"app_client":            "consumer_web",
+		"platform":              "desktop_web",
+		"x-age-consent-granted": "false",
 	}
-	if session.AuthKey != "" {
-		req.Header.Set("auth_key", session.AuthKey)
+	set := func(k, v string) {
+		if v != "" {
+			h[k] = v
+		}
 	}
-	if session.DeviceID != "" {
-		req.Header.Set("device_id", session.DeviceID)
-	}
-	if session.SessionID != "" {
-		req.Header.Set("session_uuid", session.SessionID)
-	}
+	set("access_token", session.AccessToken)
+	set("auth_key", session.AuthKey)
+	set("device_id", session.DeviceID)
+	set("session_uuid", session.SessionID)
 	if session.Lat != 0 {
-		req.Header.Set("lat", fmt.Sprintf("%f", session.Lat))
+		h["lat"] = fmt.Sprintf("%f", session.Lat)
 	}
 	if session.Lon != 0 {
-		req.Header.Set("lon", fmt.Sprintf("%f", session.Lon))
+		h["lon"] = fmt.Sprintf("%f", session.Lon)
 	}
-	if session.WebAppVersion != "" {
-		req.Header.Set("web_app_version", session.WebAppVersion)
+	set("web_app_version", session.WebAppVersion)
+	set("app_version", session.AppVersion)
+	set("rn_bundle_version", session.RNBundleVersion)
+	return h
+}
+
+// orderHistoryBody returns the JSON body for a page request, or nil for the default call.
+func orderHistoryBody(page, pageSize int) ([]byte, error) {
+	if pageSize <= 0 && page <= 1 {
+		return nil, nil
 	}
-	if session.AppVersion != "" {
-		req.Header.Set("app_version", session.AppVersion)
+	return json.Marshal(map[string]int{"page": page, "page_size": pageSize})
+}
+
+func applyHeaders(req *http.Request, session *config.Session) {
+	for k, v := range apiHeaders(session) {
+		req.Header.Set(k, v)
 	}
-	if session.RNBundleVersion != "" {
-		req.Header.Set("rn_bundle_version", session.RNBundleVersion)
-	}
+	req.Header.Set("origin", baseURL)
+	req.Header.Set("referer", baseURL+"/account/orders")
 	ua := session.UserAgent
 	if ua == "" {
 		ua = defaultUserAgent
