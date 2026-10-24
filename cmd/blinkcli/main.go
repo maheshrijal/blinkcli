@@ -105,6 +105,11 @@ func syncCmd(args []string) {
 	useHTTP := flags.Bool("http", false, "call the API directly instead of via headless Chrome")
 	_ = flags.Int("page-size", 0, "deprecated: ignored by the API")
 	_ = flags.Parse(args)
+	flags.Visit(func(f *flag.Flag) {
+		if f.Name == "page-size" {
+			fmt.Fprintln(os.Stderr, "Warning: --page-size is deprecated and ignored (the API returns 10 per page).")
+		}
+	})
 	if *maxPages < 0 {
 		fatal(fmt.Errorf("--pages must be >= 0"))
 	}
@@ -150,6 +155,7 @@ func syncCmd(args []string) {
 	}
 
 	merged, truncated, syncErr := syncPages(ctx, client, existing, pages, time.Duration(*sleepMs)*time.Millisecond)
+	stop() // restore default Ctrl-C so a second press force-quits if cleanup hangs
 	closeClient()
 
 	// Save progress even on error so a later page failure doesn't discard earlier pages.
@@ -193,6 +199,9 @@ func syncPages(ctx context.Context, client orderFetcher, existing []blink.Order,
 		if next == "" {
 			return merged, false, nil
 		}
+		if page >= pages {
+			return merged, true, nil
+		}
 		next, err = blink.PagePath(next)
 		if err != nil {
 			return merged, false, err
@@ -200,10 +209,8 @@ func syncPages(ctx context.Context, client orderFetcher, existing []blink.Order,
 		if visited[next] {
 			return merged, false, fmt.Errorf("pagination loop at page %d", page)
 		}
-		if page >= pages {
-			return merged, true, nil
-		}
 		path = next
+		// Not redundant: select picks randomly when both cases are ready (sleep 0).
 		if err := ctx.Err(); err != nil {
 			return merged, false, err
 		}

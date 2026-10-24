@@ -113,9 +113,12 @@ func mergeOrder(prev, next blink.Order) blink.Order {
 	if next.AmountRupees == 0 {
 		next.AmountRupees = prev.AmountRupees
 	}
-	// Older-year dates lose their time ("19 Oct 2025"); keep the stored precise one.
-	if next.Date.IsZero() || (sameDay(prev.Date, next.Date) && isMidnight(next.Date) && !isMidnight(prev.Date)) {
+	if next.Date.IsZero() {
 		next.Date = prev.Date
+	} else if sameDay(prev.Date, next.Date) && isMidnight(next.Date) && !isMidnight(prev.Date) {
+		// Older-year dates lose their time ("19 Oct 2025"); keep the stored time of day.
+		p, n := prev.Date, next.Date
+		next.Date = time.Date(n.Year(), n.Month(), n.Day(), p.Hour(), p.Minute(), 0, 0, n.Location())
 	}
 	if next.RawDate == "" {
 		next.RawDate = prev.RawDate
@@ -126,11 +129,12 @@ func mergeOrder(prev, next blink.Order) blink.Order {
 	return next
 }
 
+// sameDay compares wall-clock dates; legacy dates were stored in the machine's zone
+// but always hold Blinkit's IST wall-clock values, so no zone conversion.
 func sameDay(a, b time.Time) bool {
 	if a.IsZero() || b.IsZero() {
 		return false
 	}
-	b = b.In(a.Location())
 	return a.Year() == b.Year() && a.YearDay() == b.YearDay()
 }
 
@@ -145,12 +149,17 @@ func orderKey(order blink.Order) string {
 	if order.CartID != "" {
 		return "cart:" + order.CartID
 	}
-	// Day granularity, not RawDate or time: both drift ("Today, 10:54 am" ->
-	// "24 Oct, 10:54 am" -> "24 Oct 2026" at midnight).
-	if !order.Date.IsZero() || order.AmountRupees != 0 || order.Title != "" || len(order.Items) > 0 {
+	// Best effort only: without an ID there is no stable identity. RawDate drifts
+	// ("Today, ..." -> "24 Oct, ..."), so it is used only when the date didn't parse.
+	if !order.Date.IsZero() || order.AmountRupees != 0 || order.Title != "" || order.RawDate != "" || len(order.Items) > 0 {
+		rawDate := ""
+		if order.Date.IsZero() {
+			rawDate = order.RawDate
+		}
 		return strings.Join([]string{
 			"fallback",
-			order.Date.Format("2006-01-02"),
+			order.Date.Format("2006-01-02 15:04"),
+			rawDate,
 			strconvAmount(order.AmountRupees),
 			order.Title,
 			strings.Join(order.Items, "|"),

@@ -14,7 +14,9 @@ func TestPagePath(t *testing.T) {
 	good := map[string]string{
 		"":                                  orderHistoryPath,
 		"/v1/layout/order_history?cursor=x": "/v1/layout/order_history?cursor=x",
-		"https://blinkit.com/v1/layout/order_history?cursor=x": "/v1/layout/order_history?cursor=x",
+		"https://blinkit.com/v1/layout/order_history?cursor=x":     "/v1/layout/order_history?cursor=x",
+		"https://www.blinkit.com/v1/layout/order_history?cursor=x": "/v1/layout/order_history?cursor=x",
+		"https://blinkit.com:443/v1/layout/order_history":          "/v1/layout/order_history",
 	}
 	for in, want := range good {
 		if got, err := PagePath(in); err != nil || got != want {
@@ -26,6 +28,8 @@ func TestPagePath(t *testing.T) {
 		"//evil.example/v1/layout/order_history",
 		`/\evil.example/v1/layout/order_history`,
 		"http://blinkit.com/v1/layout/order_history",
+		"https://blinkit.com:8443/v1/layout/order_history",
+		"https://blinkit.com.evil.example/v1/layout/order_history",
 		"https://user@blinkit.com/v1/layout/order_history",
 		"javascript:alert(1)",
 		"/v1/user/logout",

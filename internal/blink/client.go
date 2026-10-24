@@ -142,8 +142,11 @@ func PagePath(raw string) (string, error) {
 	if err != nil || u.User != nil {
 		return "", bad
 	}
-	if (u.Scheme != "" || u.Host != "") && (u.Scheme != "https" || u.Host != "blinkit.com") {
-		return "", bad
+	if u.Scheme != "" || u.Host != "" {
+		host := u.Hostname()
+		if u.Scheme != "https" || (host != "blinkit.com" && host != "www.blinkit.com") || (u.Port() != "" && u.Port() != "443") {
+			return "", bad
+		}
 	}
 	if u.Path != orderHistoryPath {
 		return "", bad

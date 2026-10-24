@@ -76,6 +76,16 @@ func TestSyncPagesRejectsForeignNextURL(t *testing.T) {
 	}
 }
 
+func TestSyncPagesLimitBeatsBadNextURL(t *testing.T) {
+	f := &fakeFetcher{pages: map[string]fakePage{
+		first: {orders: []blink.Order{{ID: "1"}}, next: "/v1/somewhere/else"},
+	}}
+	_, truncated, err := syncPages(context.Background(), f, nil, 1, 0)
+	if err != nil || !truncated {
+		t.Fatalf("truncated=%v err=%v, want true nil", truncated, err)
+	}
+}
+
 func TestSyncPagesKeepsProgressOnError(t *testing.T) {
 	f := &fakeFetcher{pages: map[string]fakePage{
 		first: {orders: []blink.Order{{ID: "1"}}, next: pageA},

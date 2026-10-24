@@ -85,14 +85,30 @@ func TestMergeOrdersKeepsTimeAtYearRollover(t *testing.T) {
 	}
 }
 
-func TestMergeOrdersFallbackKeyStableAtYearRollover(t *testing.T) {
-	precise := time.Date(2025, 10, 19, 19, 56, 0, 0, time.UTC)
-	midnight := time.Date(2025, 10, 19, 0, 0, 0, 0, time.UTC)
-	merged, newCount := MergeOrders(
-		[]blink.Order{{Date: precise, AmountRupees: 50}},
-		[]blink.Order{{Date: midnight, AmountRupees: 50}},
-	)
-	if newCount != 0 || len(merged) != 1 {
-		t.Fatalf("newCount=%d len=%d, want 0 and 1", newCount, len(merged))
+// Without IDs, distinct orders must never be merged, even on the same day or
+// when their dates failed to parse.
+func TestMergeOrdersKeepsDistinctIDlessOrders(t *testing.T) {
+	ist := time.FixedZone("IST", 5*3600+1800)
+	sameDayAM := blink.Order{Date: time.Date(2026, 10, 24, 9, 0, 0, 0, ist), AmountRupees: 50, Items: []string{"Milk"}}
+	sameDayPM := blink.Order{Date: time.Date(2026, 10, 24, 19, 0, 0, 0, ist), AmountRupees: 50, Items: []string{"Milk"}}
+	unparsedA := blink.Order{RawDate: "Tomorrow, 9:00 am", AmountRupees: 50}
+	unparsedB := blink.Order{RawDate: "Tomorrow, 7:00 pm", AmountRupees: 50}
+
+	merged, newCount := MergeOrders([]blink.Order{sameDayAM, unparsedA}, []blink.Order{sameDayPM, unparsedB})
+	if newCount != 2 || len(merged) != 4 {
+		t.Fatalf("newCount=%d len=%d, want 2 and 4", newCount, len(merged))
+	}
+}
+
+// Legacy dates hold IST wall-clock values labeled with the machine's zone.
+func TestMergeOrdersRolloverWithLegacyZone(t *testing.T) {
+	pst := time.FixedZone("PST", -8*3600)
+	ist := time.FixedZone("IST", 5*3600+1800)
+	legacy := time.Date(2025, 10, 19, 19, 56, 0, 0, pst)
+	fresh := time.Date(2025, 10, 19, 0, 0, 0, 0, ist)
+	merged, _ := MergeOrders([]blink.Order{{ID: "1", Date: legacy}}, []blink.Order{{ID: "1", Date: fresh}})
+	want := time.Date(2025, 10, 19, 19, 56, 0, 0, ist)
+	if !merged[0].Date.Equal(want) {
+		t.Fatalf("got %v, want %v (stored time kept, relabeled IST)", merged[0].Date, want)
 	}
 }
