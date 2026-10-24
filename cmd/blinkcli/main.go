@@ -88,15 +88,16 @@ func authCmd(args []string) {
 	}
 }
 
+const maxSyncPages = 500
+
 // orderFetcher is implemented by both the HTTP and headless-Chrome clients.
 type orderFetcher interface {
-	OrderHistory(ctx context.Context, page, pageSize int) ([]blink.Order, error)
+	OrderHistory(ctx context.Context, path string) ([]blink.Order, string, error)
 }
 
 func syncCmd(args []string) {
 	flags := flag.NewFlagSet("sync", flag.ExitOnError)
-	maxPages := flags.Int("pages", 1, "max pages to fetch")
-	pageSize := flags.Int("page-size", 0, "page size if supported by the API")
+	maxPages := flags.Int("pages", 0, "max pages to fetch (0 = all)")
 	sleepMs := flags.Int("sleep-ms", 350, "sleep between pages (ms)")
 	useHTTP := flags.Bool("http", false, "call the API directly instead of via headless Chrome")
 	_ = flags.Parse(args)
@@ -131,28 +132,29 @@ func syncCmd(args []string) {
 		client = bc
 	}
 
-	pages := *maxPages
-	if pages < 1 {
-		pages = 1
+	// Hard cap guards against a pagination loop.
+	pages := maxSyncPages
+	if *maxPages > 0 && *maxPages < pages {
+		pages = *maxPages
 	}
 
 	merged := existing
+	path := ""
 	for page := 1; page <= pages; page++ {
-		orders, err := client.OrderHistory(ctx, page, *pageSize)
+		orders, next, err := client.OrderHistory(ctx, path)
 		if err != nil {
 			closeClient()
 			fatal(err)
 		}
 		updated, newCount := store.MergeOrders(merged, orders)
-		fmt.Printf("Page %d/%d: fetched %d orders, new %d\n", page, pages, len(orders), newCount)
+		fmt.Printf("Page %d: fetched %d orders, new %d\n", page, len(orders), newCount)
 		merged = updated
 
-		if len(orders) == 0 {
+		if next == "" || next == path || len(orders) == 0 {
 			break
 		}
-		if page < pages {
-			time.Sleep(time.Duration(*sleepMs) * time.Millisecond)
-		}
+		path = next
+		time.Sleep(time.Duration(*sleepMs) * time.Millisecond)
 	}
 
 	closeClient()

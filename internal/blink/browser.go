@@ -25,8 +25,8 @@ const (
 
 // fetchJS runs inside the blinkit.com page so the request uses Chrome's own
 // network stack (TLS fingerprint, Cloudflare cookies) instead of Go's.
-const fetchJS = `(async (path, headers, body) => {
-  const r = await fetch(path, {method: "POST", headers, body: body || undefined, credentials: "include"});
+const fetchJS = `(async (path, headers) => {
+  const r = await fetch(path, {method: "POST", headers, credentials: "include"});
   return JSON.stringify({status: r.status, statusText: r.statusText, body: await r.text()});
 })`
 
@@ -98,15 +98,15 @@ func (b *BrowserClient) open() error {
 	}
 }
 
-// OrderHistory fetches one page of order history from inside the page.
-func (b *BrowserClient) OrderHistory(_ context.Context, page, pageSize int) ([]Order, error) {
-	body, err := orderHistoryBody(page, pageSize)
+// OrderHistory fetches one page from inside the page; see Client.OrderHistory.
+func (b *BrowserClient) OrderHistory(_ context.Context, path string) ([]Order, string, error) {
+	path, err := pagePath(path)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
-	args, err := json.Marshal([]any{orderHistoryPath, apiHeaders(b.Session), string(body)})
+	args, err := json.Marshal([]any{path, apiHeaders(b.Session)})
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	expr := fetchJS + "(..." + string(args) + ")"
 
@@ -114,7 +114,7 @@ func (b *BrowserClient) OrderHistory(_ context.Context, page, pageSize int) ([]O
 	if err := chromedp.Run(b.ctx, chromedp.Evaluate(expr, &raw, func(p *runtime.EvaluateParams) *runtime.EvaluateParams {
 		return p.WithAwaitPromise(true)
 	})); err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	var res struct {
 		Status     int    `json:"status"`
@@ -122,14 +122,14 @@ func (b *BrowserClient) OrderHistory(_ context.Context, page, pageSize int) ([]O
 		Body       string `json:"body"`
 	}
 	if err := json.Unmarshal([]byte(raw), &res); err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	if res.Status == 401 || res.Status == 403 {
 		// Cloudflare already passed in open(), so this is the API rejecting the session.
-		return nil, fmt.Errorf("order_history request failed: %d (session expired? run 'blinkcli auth login')", res.Status)
+		return nil, "", fmt.Errorf("order_history request failed: %d (session expired? run 'blinkcli auth login')", res.Status)
 	}
 	if res.Status < 200 || res.Status >= 300 {
-		return nil, fmt.Errorf("order_history request failed: %s", strings.TrimSpace(fmt.Sprintf("%d %s", res.Status, res.StatusText)))
+		return nil, "", fmt.Errorf("order_history request failed: %s", strings.TrimSpace(fmt.Sprintf("%d %s", res.Status, res.StatusText)))
 	}
 	return ParseOrderHistory([]byte(res.Body), time.Now())
 }

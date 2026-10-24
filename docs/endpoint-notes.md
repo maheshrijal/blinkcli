@@ -51,8 +51,15 @@ Do NOT store real tokens/cookies in the repo.
   - Uses same auth headers as order_history.
 
 ## Pagination / filters
-- No pagination params observed on `order_history`; scrolling did not trigger a follow-up request.
-- If large histories exist, pagination may be encoded in headers or a future payload field.
+- Cursor-based: `response.pagination.next_url` holds the next page path
+  (`/v1/layout/order_history?offset=0&limit=10&cursor=...`); absent on the last page.
+- POST it with an empty body; 10 orders per page. `page`/`page_size` body fields are ignored.
+- `/v1/order_count` undercounts (reported 17 delivered vs 41 actual on 2026-10-24); don't rely on it.
+
+## Date formats (subtitle of `image_text_vr_type_header`)
+- `Today, 10:54 am` / `Yesterday, ...`
+- `09 Oct, 9:32 am` (current year, no year shown)
+- `19 Oct 2025` (older years, no time)
 
 ## Cloudflare TLS fingerprinting (2026-10-24)
 - Same code got `403` when built with Go 1.25.5 and `200` with Go 1.27.3.

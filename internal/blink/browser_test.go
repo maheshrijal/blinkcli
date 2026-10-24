@@ -10,11 +10,16 @@ func TestDesktopUserAgent(t *testing.T) {
 	}
 }
 
-func TestOrderHistoryBody(t *testing.T) {
-	if b, _ := orderHistoryBody(1, 0); b != nil {
-		t.Fatalf("default call should send empty body, got %s", b)
+func TestPagePath(t *testing.T) {
+	if p, _ := pagePath(""); p != orderHistoryPath {
+		t.Fatalf("empty path should default to first page, got %q", p)
 	}
-	if b, _ := orderHistoryBody(2, 20); string(b) != `{"page":2,"page_size":20}` {
-		t.Fatalf("unexpected body %s", b)
+	if p, err := pagePath("/v1/layout/order_history?cursor=x"); err != nil || p != "/v1/layout/order_history?cursor=x" {
+		t.Fatalf("relative path rejected: %q %v", p, err)
+	}
+	for _, bad := range []string{"https://evil.example/x", "//evil.example/x"} {
+		if _, err := pagePath(bad); err == nil {
+			t.Fatalf("expected %q to be rejected", bad)
+		}
 	}
 }

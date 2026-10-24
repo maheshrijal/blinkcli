@@ -32,3 +32,19 @@ func TestStoreSaveLoad(t *testing.T) {
 		t.Fatalf("expected ids to persist, got %+v", loaded)
 	}
 }
+
+func TestMergeOrdersPrefersIncoming(t *testing.T) {
+	existing := []blink.Order{{ID: "1", RawDate: "Today, 10:54 am"}}
+	fixed := time.Date(2026, 10, 24, 10, 54, 0, 0, time.UTC)
+	incoming := []blink.Order{{ID: "1", RawDate: "24 Oct, 10:54 am", Date: fixed}, {ID: "2"}}
+
+	merged, newCount := MergeOrders(existing, incoming)
+	if newCount != 1 || len(merged) != 2 {
+		t.Fatalf("newCount=%d len=%d, want 1 and 2", newCount, len(merged))
+	}
+	for _, o := range merged {
+		if o.ID == "1" && !o.Date.Equal(fixed) {
+			t.Fatalf("stale record not replaced: %+v", o)
+		}
+	}
+}

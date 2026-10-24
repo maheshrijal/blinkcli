@@ -73,10 +73,11 @@ func MergeOrders(existing, incoming []blink.Order) ([]blink.Order, int) {
 			key = fmt.Sprintf("unknown-incoming-%d", unknownIncoming)
 			unknownIncoming++
 		}
+		// Fresh data wins so re-syncs repair stale fields (e.g. unparsed dates).
 		if _, ok := seen[key]; !ok {
-			seen[key] = order
 			newCount++
 		}
+		seen[key] = order
 	}
 
 	merged := make([]blink.Order, 0, len(seen))

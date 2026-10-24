@@ -44,7 +44,7 @@ by their TLS fingerprint.
 Optional flags:
 
 ```bash
-blinkcli sync --pages 1 --page-size 0 --sleep-ms 350
+blinkcli sync --pages 0 --sleep-ms 350   # 0 = all pages
 blinkcli sync --http   # call the API directly (no Chrome; may get 403)
 ```
 

@@ -13,7 +13,10 @@ import (
 type orderHistoryResponse struct {
 	IsSuccess bool `json:"is_success"`
 	Response  struct {
-		Snippets []snippet `json:"snippets"`
+		Snippets   []snippet `json:"snippets"`
+		Pagination struct {
+			NextURL string `json:"next_url"`
+		} `json:"pagination"`
 	} `json:"response"`
 }
 
@@ -78,14 +81,14 @@ type OrderCount struct {
 	Cancelled int `json:"cancelled"`
 }
 
-// ParseOrderHistory extracts orders from the order_history response.
-func ParseOrderHistory(body []byte, now time.Time) ([]Order, error) {
+// ParseOrderHistory extracts orders and the next-page path ("" on the last page).
+func ParseOrderHistory(body []byte, now time.Time) ([]Order, string, error) {
 	var resp orderHistoryResponse
 	if err := json.Unmarshal(body, &resp); err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	if !resp.IsSuccess {
-		return nil, errors.New("order_history response not successful")
+		return nil, "", errors.New("order_history response not successful")
 	}
 
 	orders := make([]Order, 0)
@@ -98,7 +101,7 @@ func ParseOrderHistory(body []byte, now time.Time) ([]Order, error) {
 			orders = append(orders, order)
 		}
 	}
-	return orders, nil
+	return orders, resp.Response.Pagination.NextURL, nil
 }
 
 func parseOrderContainer(sn snippet, now time.Time) (Order, bool) {
@@ -176,11 +179,28 @@ func parseDeeplink(raw, fallbackOrderID string) (string, string) {
 	return orderID, cartID
 }
 
-var dateRe = regexp.MustCompile(`^(\d{1,2})\s([A-Za-z]{3})(?:,)?\s*(\d{4})?,?\s*(\d{1,2}:\d{2}\s?[ap]m)$`)
+var (
+	dateRe     = regexp.MustCompile(`^(\d{1,2})\s([A-Za-z]{3})(?:,)?\s*(\d{4})?,?\s*(\d{1,2}:\d{2}\s?[ap]m)?$`)
+	relativeRe = regexp.MustCompile(`^(?i)(today|yesterday),?\s*(\d{1,2}:\d{2}\s?[ap]m)$`)
+)
 
-// ParseDate parses Blinkit order date strings like "19 Oct, 7:56 pm".
+// ParseDate parses Blinkit order dates: "Today, 10:54 am", "Yesterday, 9:00 pm",
+// "19 Oct, 7:56 pm" (current year) and "19 Oct 2025" (older years, no time).
 func ParseDate(input string, now time.Time) (time.Time, error) {
-	match := dateRe.FindStringSubmatch(strings.TrimSpace(input))
+	input = strings.TrimSpace(input)
+	if match := relativeRe.FindStringSubmatch(input); match != nil {
+		parsedTime, err := time.Parse("3:04 pm", strings.ToLower(strings.TrimSpace(match[2])))
+		if err != nil {
+			return time.Time{}, err
+		}
+		day := now
+		if strings.EqualFold(match[1], "yesterday") {
+			day = now.AddDate(0, 0, -1)
+		}
+		return time.Date(day.Year(), day.Month(), day.Day(), parsedTime.Hour(), parsedTime.Minute(), 0, 0, now.Location()), nil
+	}
+
+	match := dateRe.FindStringSubmatch(input)
 	if len(match) == 0 {
 		return time.Time{}, errors.New("unrecognized date format")
 	}
@@ -202,9 +222,13 @@ func ParseDate(input string, now time.Time) (time.Time, error) {
 		}
 	}
 
-	parsedTime, err := time.Parse("3:04 pm", strings.ToLower(timeStr))
-	if err != nil {
-		return time.Time{}, err
+	// Older-year dates carry no time; default to midnight.
+	parsedTime := time.Time{}
+	if timeStr != "" {
+		parsedTime, err = time.Parse("3:04 pm", strings.ToLower(timeStr))
+		if err != nil {
+			return time.Time{}, err
+		}
 	}
 
 	loc := now.Location()

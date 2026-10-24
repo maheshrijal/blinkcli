@@ -1,9 +1,7 @@
 package blink
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -64,44 +62,36 @@ func (c *Client) OrderCount(ctx context.Context) (OrderCount, error) {
 	return parseOrderCount(body, c.Session.UserID)
 }
 
-// OrderHistory fetches one page of order history.
-// If pageSize is 0, an empty body is sent (matches observed web call).
-func (c *Client) OrderHistory(ctx context.Context, page, pageSize int) ([]Order, error) {
+// OrderHistory fetches one page of order history and returns the next page path.
+// Pass "" for the first page, then the returned path until it is "".
+func (c *Client) OrderHistory(ctx context.Context, path string) ([]Order, string, error) {
 	if c.Session == nil {
-		return nil, errors.New("missing session")
+		return nil, "", errors.New("missing session")
+	}
+	path, err := pagePath(path)
+	if err != nil {
+		return nil, "", err
 	}
 	if err := c.ensureCookies(ctx); err != nil {
-		return nil, err
+		return nil, "", err
 	}
-	var body io.Reader
-	buf, err := orderHistoryBody(page, pageSize)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+path, nil)
 	if err != nil {
-		return nil, err
-	}
-	if buf != nil {
-		body = bytes.NewReader(buf)
-	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+orderHistoryPath, body)
-	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	applyHeaders(req, c.Session)
-	if body != nil {
-		req.Header.Set("Content-Type", "application/json")
-	}
 
 	resp, err := c.HTTP.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("order_history request failed: %s", resp.Status)
+		return nil, "", fmt.Errorf("order_history request failed: %s", resp.Status)
 	}
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	return ParseOrderHistory(respBody, time.Now())
 }
@@ -137,12 +127,16 @@ func apiHeaders(session *config.Session) map[string]string {
 	return h
 }
 
-// orderHistoryBody returns the JSON body for a page request, or nil for the default call.
-func orderHistoryBody(page, pageSize int) ([]byte, error) {
-	if pageSize <= 0 && page <= 1 {
-		return nil, nil
+// pagePath defaults to the first page and rejects non-relative next_url values,
+// so session headers are never sent off blinkit.com.
+func pagePath(path string) (string, error) {
+	if path == "" {
+		return orderHistoryPath, nil
 	}
-	return json.Marshal(map[string]int{"page": page, "page_size": pageSize})
+	if !strings.HasPrefix(path, "/") || strings.HasPrefix(path, "//") {
+		return "", fmt.Errorf("unexpected pagination url %q", path)
+	}
+	return path, nil
 }
 
 func applyHeaders(req *http.Request, session *config.Session) {

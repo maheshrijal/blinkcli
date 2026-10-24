@@ -16,6 +16,33 @@ func TestParseDate(t *testing.T) {
 	}
 }
 
+// Formats seen on a real account (2026-10-24): relative, current-year, older-year.
+func TestParseDateFormats(t *testing.T) {
+	ist := time.FixedZone("IST", 5*3600+1800)
+	now := time.Date(2026, 10, 24, 21, 0, 0, 0, ist)
+	cases := []struct {
+		in   string
+		want time.Time
+	}{
+		{"Today, 10:54 am", time.Date(2026, 10, 24, 10, 54, 0, 0, ist)},
+		{"Yesterday, 9:05 pm", time.Date(2026, 10, 23, 21, 5, 0, 0, ist)},
+		{"09 Oct, 9:32 am", time.Date(2026, 10, 9, 9, 32, 0, 0, ist)},
+		{"04 Jan, 7:35 pm", time.Date(2026, 1, 4, 19, 35, 0, 0, ist)},
+		{"19 Oct 2025", time.Date(2025, 10, 19, 0, 0, 0, 0, ist)},
+		{"26 Jun 2024", time.Date(2024, 6, 26, 0, 0, 0, 0, ist)},
+	}
+	for _, tc := range cases {
+		got, err := ParseDate(tc.in, now)
+		if err != nil {
+			t.Errorf("ParseDate(%q) error: %v", tc.in, err)
+			continue
+		}
+		if !got.Equal(tc.want) {
+			t.Errorf("ParseDate(%q) = %v, want %v", tc.in, got, tc.want)
+		}
+	}
+}
+
 func TestParseAmountRupees(t *testing.T) {
 	amount, err := ParseAmountRupees("₹1,234")
 	if err != nil {
@@ -62,13 +89,17 @@ func TestParseOrderHistoryItems(t *testing.T) {
 						}
 					}
 				}
-			]
+			],
+			"pagination": {"next_url": "/v1/layout/order_history?offset=0&limit=10&cursor=abc"}
 		}
 	}`)
 
-	orders, err := ParseOrderHistory(payload, time.Date(2025, 12, 20, 12, 0, 0, 0, time.UTC))
+	orders, next, err := ParseOrderHistory(payload, time.Date(2025, 12, 20, 12, 0, 0, 0, time.UTC))
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
+	}
+	if next != "/v1/layout/order_history?offset=0&limit=10&cursor=abc" {
+		t.Fatalf("unexpected next url: %q", next)
 	}
 	if len(orders) != 1 {
 		t.Fatalf("expected 1 order, got %d", len(orders))
