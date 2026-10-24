@@ -50,8 +50,13 @@ func (s *Store) Save(orders []blink.Order) error {
 	if err != nil {
 		return err
 	}
-	// Temp file + rename: an interrupted save never leaves a truncated orders.json.
-	tmp, err := os.CreateTemp(filepath.Dir(s.Path), ".orders-*.json")
+	// Write into the symlink target, if any, so renaming doesn't replace the link.
+	path := s.Path
+	if resolved, err := filepath.EvalSymlinks(path); err == nil {
+		path = resolved
+	}
+	// Temp file (CreateTemp uses 0600) + fsync + rename: never a truncated orders.json.
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".orders-*.json")
 	if err != nil {
 		return err
 	}
@@ -60,14 +65,14 @@ func (s *Store) Save(orders []blink.Order) error {
 		tmp.Close()
 		return err
 	}
-	if err := tmp.Chmod(0o600); err != nil {
+	if err := tmp.Sync(); err != nil {
 		tmp.Close()
 		return err
 	}
 	if err := tmp.Close(); err != nil {
 		return err
 	}
-	return os.Rename(tmp.Name(), s.Path)
+	return os.Rename(tmp.Name(), path)
 }
 
 // MergeOrders merges incoming orders into existing ones, returning the merged list and new count.

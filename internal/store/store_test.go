@@ -135,3 +135,25 @@ func TestStoreSaveIsAtomic(t *testing.T) {
 		t.Fatalf("loaded %d orders, want 2", len(got))
 	}
 }
+
+func TestStoreSaveKeepsSymlink(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "real.json")
+	link := filepath.Join(dir, "orders.json")
+	if err := os.WriteFile(target, []byte("[]"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatal(err)
+	}
+	st := &Store{Path: link}
+	if err := st.Save([]blink.Order{{ID: "1"}}); err != nil {
+		t.Fatal(err)
+	}
+	if fi, _ := os.Lstat(link); fi.Mode()&os.ModeSymlink == 0 {
+		t.Fatal("symlink was replaced by a regular file")
+	}
+	if got, _ := (&Store{Path: target}).Load(); len(got) != 1 {
+		t.Fatalf("target has %d orders, want 1", len(got))
+	}
+}
