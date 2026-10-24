@@ -52,8 +52,10 @@ func (s *Store) Save(orders []blink.Order) error {
 	}
 	// Write into the symlink target, if any, so renaming doesn't replace the link.
 	path := s.Path
-	if resolved, err := filepath.EvalSymlinks(path); err == nil {
-		path = resolved
+	if fi, err := os.Lstat(path); err == nil && fi.Mode()&os.ModeSymlink != 0 {
+		if path, err = filepath.EvalSymlinks(path); err != nil {
+			return fmt.Errorf("orders.json symlink is broken: %w", err)
+		}
 	}
 	// Temp file (CreateTemp uses 0600) + fsync + rename: never a truncated orders.json.
 	tmp, err := os.CreateTemp(filepath.Dir(path), ".orders-*.json")
@@ -72,7 +74,16 @@ func (s *Store) Save(orders []blink.Order) error {
 	if err := tmp.Close(); err != nil {
 		return err
 	}
-	return os.Rename(tmp.Name(), path)
+	if err := os.Rename(tmp.Name(), path); err != nil {
+		return err
+	}
+	// fsync the directory so the rename itself survives a crash.
+	dir, err := os.Open(filepath.Dir(path))
+	if err != nil {
+		return err
+	}
+	defer dir.Close()
+	return dir.Sync()
 }
 
 // MergeOrders merges incoming orders into existing ones, returning the merged list and new count.

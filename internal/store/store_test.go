@@ -157,3 +157,17 @@ func TestStoreSaveKeepsSymlink(t *testing.T) {
 		t.Fatalf("target has %d orders, want 1", len(got))
 	}
 }
+
+func TestStoreSaveRejectsBrokenSymlink(t *testing.T) {
+	dir := t.TempDir()
+	link := filepath.Join(dir, "orders.json")
+	if err := os.Symlink(filepath.Join(dir, "missing", "real.json"), link); err != nil {
+		t.Fatal(err)
+	}
+	if err := (&Store{Path: link}).Save([]blink.Order{{ID: "1"}}); err == nil {
+		t.Fatal("expected error for broken symlink")
+	}
+	if fi, _ := os.Lstat(link); fi.Mode()&os.ModeSymlink == 0 {
+		t.Fatal("broken symlink was replaced by a regular file")
+	}
+}

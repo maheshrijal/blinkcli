@@ -153,15 +153,17 @@ func syncCmd(args []string) {
 	}
 
 	merged, truncated, syncErr := syncPages(ctx, client, existing, pages, time.Duration(*sleepMs)*time.Millisecond)
+	// Read before stop(): stop() itself cancels ctx.
+	interrupted := ctx.Err() != nil
 	stop() // restore default Ctrl-C so a second press force-quits if cleanup hangs
 	closeClient()
 
 	// Save progress even on error so a later page failure doesn't discard earlier pages.
 	if err := st.Save(merged); err != nil {
-		fatal(err)
+		fatal(errors.Join(syncErr, err))
 	}
-	// A killed Chrome may surface a non-context error, so check ctx itself.
-	if syncErr != nil && ctx.Err() != nil {
+	// A killed Chrome may surface a non-context error, so check the signal itself.
+	if syncErr != nil && interrupted {
 		syncErr = errors.New("interrupted")
 	}
 	if syncErr != nil {
