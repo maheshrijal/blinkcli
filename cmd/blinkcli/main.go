@@ -100,7 +100,7 @@ type orderFetcher interface {
 
 func syncCmd(args []string) {
 	flags := flag.NewFlagSet("sync", flag.ExitOnError)
-	maxPages := flags.Int("pages", 0, "max pages to fetch (0 = all)")
+	maxPages := flags.Int("pages", 0, "max pages to fetch (0 = all, up to 500)")
 	sleepMs := flags.Int("sleep-ms", 350, "sleep between pages (ms)")
 	useHTTP := flags.Bool("http", false, "call the API directly instead of via headless Chrome")
 	_ = flags.Int("page-size", 0, "deprecated: ignored by the API")
