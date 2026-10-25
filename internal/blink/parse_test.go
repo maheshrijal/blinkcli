@@ -16,6 +16,56 @@ func TestParseDate(t *testing.T) {
 	}
 }
 
+// Formats seen on a real account (2026-10-24): relative, current-year, older-year.
+func TestParseDateFormats(t *testing.T) {
+	ist := time.FixedZone("IST", 5*3600+1800)
+	now := time.Date(2026, 10, 24, 21, 0, 0, 0, ist)
+	cases := []struct {
+		in   string
+		want time.Time
+	}{
+		{"Today, 10:54 am", time.Date(2026, 10, 24, 10, 54, 0, 0, ist)},
+		{"Yesterday, 9:05 pm", time.Date(2026, 10, 23, 21, 5, 0, 0, ist)},
+		{"09 Oct, 9:32 am", time.Date(2026, 10, 9, 9, 32, 0, 0, ist)},
+		{"04 Jan, 7:35 pm", time.Date(2026, 1, 4, 19, 35, 0, 0, ist)},
+		{"19 Oct 2025", time.Date(2025, 10, 19, 0, 0, 0, 0, ist)},
+		{"26 Jun 2024", time.Date(2024, 6, 26, 0, 0, 0, 0, ist)},
+		{"Yesterday, 9:00pm", time.Date(2026, 10, 23, 21, 0, 0, 0, ist)},
+		{"09 Oct, 9:32AM", time.Date(2026, 10, 9, 9, 32, 0, 0, ist)},
+	}
+	for _, tc := range cases {
+		got, err := ParseDate(tc.in, now)
+		if err != nil {
+			t.Errorf("ParseDate(%q) error: %v", tc.in, err)
+			continue
+		}
+		if !got.Equal(tc.want) {
+			t.Errorf("ParseDate(%q) = %v, want %v", tc.in, got, tc.want)
+		}
+	}
+}
+
+// A machine in UTC at 20:00 Oct 23 is already Oct 24 in IST, where Blinkit's "Today" lives.
+func TestParseDateAnchorsToIST(t *testing.T) {
+	now := time.Date(2026, 10, 23, 20, 0, 0, 0, time.UTC)
+	got, err := ParseDate("Today, 12:30 am", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := time.Date(2026, 10, 24, 0, 30, 0, 0, ist)
+	if !got.Equal(want) {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+}
+
+func TestParseDateRejectsBareDayMonth(t *testing.T) {
+	for _, in := range []string{"19 Oct", "19 Oct,"} {
+		if _, err := ParseDate(in, time.Now()); err == nil {
+			t.Errorf("ParseDate(%q) accepted a date with neither year nor time", in)
+		}
+	}
+}
+
 func TestParseAmountRupees(t *testing.T) {
 	amount, err := ParseAmountRupees("₹1,234")
 	if err != nil {
@@ -62,13 +112,17 @@ func TestParseOrderHistoryItems(t *testing.T) {
 						}
 					}
 				}
-			]
+			],
+			"pagination": {"next_url": "/v1/layout/order_history?offset=0&limit=10&cursor=abc"}
 		}
 	}`)
 
-	orders, err := ParseOrderHistory(payload, time.Date(2025, 12, 20, 12, 0, 0, 0, time.UTC))
+	orders, next, err := ParseOrderHistory(payload, time.Date(2025, 12, 20, 12, 0, 0, 0, time.UTC))
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
+	}
+	if next != "/v1/layout/order_history?offset=0&limit=10&cursor=abc" {
+		t.Fatalf("unexpected next url: %q", next)
 	}
 	if len(orders) != 1 {
 		t.Fatalf("expected 1 order, got %d", len(orders))

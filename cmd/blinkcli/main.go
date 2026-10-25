@@ -2,9 +2,12 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"blinkcli/internal/auth"
@@ -88,18 +91,28 @@ func authCmd(args []string) {
 	}
 }
 
+const maxSyncPages = 500
+
 // orderFetcher is implemented by both the HTTP and headless-Chrome clients.
 type orderFetcher interface {
-	OrderHistory(ctx context.Context, page, pageSize int) ([]blink.Order, error)
+	OrderHistory(ctx context.Context, path string) ([]blink.Order, string, error)
 }
 
 func syncCmd(args []string) {
 	flags := flag.NewFlagSet("sync", flag.ExitOnError)
-	maxPages := flags.Int("pages", 1, "max pages to fetch")
-	pageSize := flags.Int("page-size", 0, "page size if supported by the API")
+	maxPages := flags.Int("pages", 0, "max pages to fetch (0 = all, up to 500)")
 	sleepMs := flags.Int("sleep-ms", 350, "sleep between pages (ms)")
 	useHTTP := flags.Bool("http", false, "call the API directly instead of via headless Chrome")
+	_ = flags.Int("page-size", 0, "deprecated: ignored by the API")
 	_ = flags.Parse(args)
+	flags.Visit(func(f *flag.Flag) {
+		if f.Name == "page-size" {
+			fmt.Fprintln(os.Stderr, "Warning: --page-size is deprecated and ignored (the API returns 10 per page).")
+		}
+	})
+	if *maxPages < 0 {
+		fatal(fmt.Errorf("--pages must be >= 0"))
+	}
 
 	cfg, err := config.Load()
 	if err != nil {
@@ -118,7 +131,9 @@ func syncCmd(args []string) {
 		fatal(err)
 	}
 
-	ctx := context.Background()
+	// Ctrl-C cancels ctx: chromedp kills Chrome, and progress so far is saved below.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 	var client orderFetcher = blink.NewClient(cfg.Session)
 	closeClient := func() {}
 	if !*useHTTP {
@@ -131,36 +146,84 @@ func syncCmd(args []string) {
 		client = bc
 	}
 
-	pages := *maxPages
-	if pages < 1 {
-		pages = 1
+	// Safety cap applies only when --pages is unset; an explicit value is honored.
+	pages := maxSyncPages
+	if *maxPages > 0 {
+		pages = *maxPages
 	}
 
-	merged := existing
-	for page := 1; page <= pages; page++ {
-		orders, err := client.OrderHistory(ctx, page, *pageSize)
-		if err != nil {
-			closeClient()
-			fatal(err)
-		}
-		updated, newCount := store.MergeOrders(merged, orders)
-		fmt.Printf("Page %d/%d: fetched %d orders, new %d\n", page, pages, len(orders), newCount)
-		merged = updated
-
-		if len(orders) == 0 {
-			break
-		}
-		if page < pages {
-			time.Sleep(time.Duration(*sleepMs) * time.Millisecond)
-		}
-	}
-
+	merged, truncated, syncErr := syncPages(ctx, client, existing, pages, time.Duration(*sleepMs)*time.Millisecond)
+	// Read before stop(): stop() itself cancels ctx.
+	interrupted := ctx.Err() != nil
+	stop() // restore default Ctrl-C so a second press force-quits if cleanup hangs
 	closeClient()
 
+	// Save progress even on error so a later page failure doesn't discard earlier pages.
 	if err := st.Save(merged); err != nil {
-		fatal(err)
+		fatal(errors.Join(syncErr, err))
+	}
+	// A killed Chrome may surface a non-context error, so check the signal itself.
+	if syncErr != nil && interrupted {
+		if errors.Is(syncErr, context.Canceled) {
+			syncErr = errors.New("interrupted")
+		} else {
+			syncErr = fmt.Errorf("interrupted: %w", syncErr)
+		}
+	}
+	if syncErr != nil {
+		fatal(fmt.Errorf("%w (progress saved; %d orders stored)", syncErr, len(merged)))
+	}
+	if truncated {
+		if *maxPages > 0 {
+			fmt.Printf("Stopped at the --pages limit (%d); more history remains.\n", pages)
+		} else {
+			fmt.Printf("Stopped at the %d-page safety cap; use --pages to go further.\n", pages)
+		}
 	}
 	fmt.Printf("Sync complete. Stored %d orders.\n", len(merged))
+}
+
+// syncPages follows next_url up to pages; returns progress even on error, and whether it hit the limit.
+func syncPages(ctx context.Context, client orderFetcher, existing []blink.Order, pages int, sleep time.Duration) ([]blink.Order, bool, error) {
+	merged := existing
+	path, _ := blink.PagePath("")
+	// Keyed by normalized path so a next_url back to page 1 counts as a loop.
+	visited := map[string]bool{}
+	for page := 1; ; page++ {
+		visited[path] = true
+		orders, next, err := client.OrderHistory(ctx, path)
+		if err != nil {
+			return merged, false, fmt.Errorf("page %d: %w", page, err)
+		}
+		updated, newCount := store.MergeOrders(merged, orders)
+		fmt.Printf("Page %d: fetched %d orders, new %d\n", page, len(orders), newCount)
+		merged = updated
+
+		// next_url alone decides the end; a page may hold no parseable orders.
+		if next == "" {
+			return merged, false, nil
+		}
+		if page >= pages {
+			return merged, true, nil
+		}
+		next, err = blink.PagePath(next)
+		if err != nil {
+			return merged, false, err
+		}
+		if visited[next] {
+			return merged, false, fmt.Errorf("pagination loop at page %d", page)
+		}
+		path = next
+		// Not redundant: select picks randomly when both cases are ready (sleep 0).
+		if err := ctx.Err(); err != nil {
+			return merged, false, err
+		}
+		select {
+		case <-ctx.Done():
+			return merged, false, ctx.Err()
+		case <-time.After(sleep):
+		}
+	}
 }
 
 func ordersCmd() {

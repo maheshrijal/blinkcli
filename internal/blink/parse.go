@@ -13,7 +13,10 @@ import (
 type orderHistoryResponse struct {
 	IsSuccess bool `json:"is_success"`
 	Response  struct {
-		Snippets []snippet `json:"snippets"`
+		Snippets   []snippet `json:"snippets"`
+		Pagination struct {
+			NextURL string `json:"next_url"`
+		} `json:"pagination"`
 	} `json:"response"`
 }
 
@@ -78,14 +81,14 @@ type OrderCount struct {
 	Cancelled int `json:"cancelled"`
 }
 
-// ParseOrderHistory extracts orders from the order_history response.
-func ParseOrderHistory(body []byte, now time.Time) ([]Order, error) {
+// ParseOrderHistory extracts orders and the next-page path ("" on the last page).
+func ParseOrderHistory(body []byte, now time.Time) ([]Order, string, error) {
 	var resp orderHistoryResponse
 	if err := json.Unmarshal(body, &resp); err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	if !resp.IsSuccess {
-		return nil, errors.New("order_history response not successful")
+		return nil, "", errors.New("order_history response not successful")
 	}
 
 	orders := make([]Order, 0)
@@ -98,7 +101,7 @@ func ParseOrderHistory(body []byte, now time.Time) ([]Order, error) {
 			orders = append(orders, order)
 		}
 	}
-	return orders, nil
+	return orders, resp.Response.Pagination.NextURL, nil
 }
 
 func parseOrderContainer(sn snippet, now time.Time) (Order, bool) {
@@ -176,11 +179,30 @@ func parseDeeplink(raw, fallbackOrderID string) (string, string) {
 	return orderID, cartID
 }
 
-var dateRe = regexp.MustCompile(`^(\d{1,2})\s([A-Za-z]{3})(?:,)?\s*(\d{4})?,?\s*(\d{1,2}:\d{2}\s?[ap]m)$`)
+var (
+	ist        = time.FixedZone("IST", 5*3600+1800) // India has no DST
+	dateRe     = regexp.MustCompile(`(?i)^(\d{1,2})\s([A-Za-z]{3})(?:,)?\s*(\d{4})?,?\s*(\d{1,2}:\d{2}\s?[ap]m)?$`)
+	relativeRe = regexp.MustCompile(`^(?i)(today|yesterday),?\s*(\d{1,2}:\d{2}\s?[ap]m)$`)
+)
 
-// ParseDate parses Blinkit order date strings like "19 Oct, 7:56 pm".
+// ParseDate parses "Today, 10:54 am", "Yesterday, ...", "19 Oct, 7:56 pm" and "19 Oct 2025".
 func ParseDate(input string, now time.Time) (time.Time, error) {
-	match := dateRe.FindStringSubmatch(strings.TrimSpace(input))
+	// Blinkit renders dates in IST; anchor there so "Today" is the right day anywhere.
+	now = now.In(ist)
+	input = strings.TrimSpace(input)
+	if match := relativeRe.FindStringSubmatch(input); match != nil {
+		parsedTime, err := parseClock(match[2])
+		if err != nil {
+			return time.Time{}, err
+		}
+		day := now
+		if strings.EqualFold(match[1], "yesterday") {
+			day = now.AddDate(0, 0, -1)
+		}
+		return time.Date(day.Year(), day.Month(), day.Day(), parsedTime.Hour(), parsedTime.Minute(), 0, 0, now.Location()), nil
+	}
+
+	match := dateRe.FindStringSubmatch(input)
 	if len(match) == 0 {
 		return time.Time{}, errors.New("unrecognized date format")
 	}
@@ -188,6 +210,10 @@ func ParseDate(input string, now time.Time) (time.Time, error) {
 	monthStr := match[2]
 	yearStr := match[3]
 	timeStr := strings.TrimSpace(match[4])
+	// Without a year or a time the year is a guess; refuse rather than misfile it.
+	if yearStr == "" && timeStr == "" {
+		return time.Time{}, errors.New("date has neither year nor time")
+	}
 
 	monthTime, err := time.Parse("Jan", monthStr)
 	if err != nil {
@@ -202,9 +228,13 @@ func ParseDate(input string, now time.Time) (time.Time, error) {
 		}
 	}
 
-	parsedTime, err := time.Parse("3:04 pm", strings.ToLower(timeStr))
-	if err != nil {
-		return time.Time{}, err
+	// Older-year dates carry no time; default to midnight.
+	parsedTime := time.Time{}
+	if timeStr != "" {
+		parsedTime, err = parseClock(timeStr)
+		if err != nil {
+			return time.Time{}, err
+		}
 	}
 
 	loc := now.Location()
@@ -213,6 +243,12 @@ func ParseDate(input string, now time.Time) (time.Time, error) {
 		parsed = parsed.AddDate(-1, 0, 0)
 	}
 	return parsed, nil
+}
+
+// parseClock parses "9:05 pm" or "9:05pm".
+func parseClock(s string) (time.Time, error) {
+	s = strings.ToLower(strings.ReplaceAll(s, " ", ""))
+	return time.Parse("3:04pm", s)
 }
 
 // ParseAmountRupees extracts an integer rupee amount from strings like "₹1,234".

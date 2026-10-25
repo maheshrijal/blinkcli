@@ -1,6 +1,7 @@
 package store
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -30,5 +31,159 @@ func TestStoreSaveLoad(t *testing.T) {
 	}
 	if loaded[0].ID == "" || loaded[1].ID == "" {
 		t.Fatalf("expected ids to persist, got %+v", loaded)
+	}
+}
+
+func TestMergeOrdersPrefersIncoming(t *testing.T) {
+	existing := []blink.Order{{ID: "1", RawDate: "Today, 10:54 am"}}
+	fixed := time.Date(2026, 10, 24, 10, 54, 0, 0, time.UTC)
+	incoming := []blink.Order{{ID: "1", RawDate: "24 Oct, 10:54 am", Date: fixed}, {ID: "2"}}
+
+	merged, newCount := MergeOrders(existing, incoming)
+	if newCount != 1 || len(merged) != 2 {
+		t.Fatalf("newCount=%d len=%d, want 1 and 2", newCount, len(merged))
+	}
+	for _, o := range merged {
+		if o.ID == "1" && !o.Date.Equal(fixed) {
+			t.Fatalf("stale record not replaced: %+v", o)
+		}
+	}
+}
+
+func TestMergeOrdersKeepsGoodFieldsOnParseFailure(t *testing.T) {
+	good := time.Date(2026, 10, 9, 9, 32, 0, 0, time.UTC)
+	existing := []blink.Order{{ID: "1", Date: good, AmountRupees: 228, Items: []string{"Bread"}}}
+	incoming := []blink.Order{{ID: "1", Status: "DELIVERED"}} // date/amount/items failed to parse
+
+	merged, _ := MergeOrders(existing, incoming)
+	o := merged[0]
+	if !o.Date.Equal(good) || o.AmountRupees != 228 || len(o.Items) != 1 || o.Status != "DELIVERED" {
+		t.Fatalf("good fields lost or fresh field dropped: %+v", o)
+	}
+}
+
+func TestMergeOrdersFallbackKeyIgnoresRawDateDrift(t *testing.T) {
+	d := time.Date(2026, 10, 24, 10, 54, 0, 0, time.UTC)
+	existing := []blink.Order{{RawDate: "Today, 10:54 am", Date: d, AmountRupees: 50}}
+	incoming := []blink.Order{{RawDate: "24 Oct, 10:54 am", Date: d, AmountRupees: 50}}
+
+	merged, newCount := MergeOrders(existing, incoming)
+	if newCount != 0 || len(merged) != 1 {
+		t.Fatalf("newCount=%d len=%d, want 0 and 1", newCount, len(merged))
+	}
+}
+
+// At year rollover "19 Oct, 7:56 pm" becomes "19 Oct 2025" (midnight); keep the time.
+func TestMergeOrdersKeepsTimeAtYearRollover(t *testing.T) {
+	precise := time.Date(2025, 10, 19, 19, 56, 0, 0, time.UTC)
+	midnight := time.Date(2025, 10, 19, 0, 0, 0, 0, time.UTC)
+	merged, _ := MergeOrders(
+		[]blink.Order{{ID: "1", Date: precise}},
+		[]blink.Order{{ID: "1", Date: midnight, RawDate: "19 Oct 2025"}},
+	)
+	if !merged[0].Date.Equal(precise) || merged[0].RawDate != "19 Oct 2025" {
+		t.Fatalf("got %+v, want precise time kept and fresh RawDate", merged[0])
+	}
+}
+
+// Without IDs, distinct orders must never be merged, even on the same day or
+// when their dates failed to parse.
+func TestMergeOrdersKeepsDistinctIDlessOrders(t *testing.T) {
+	ist := time.FixedZone("IST", 5*3600+1800)
+	sameDayAM := blink.Order{Date: time.Date(2026, 10, 24, 9, 0, 0, 0, ist), AmountRupees: 50, Items: []string{"Milk"}}
+	sameDayPM := blink.Order{Date: time.Date(2026, 10, 24, 19, 0, 0, 0, ist), AmountRupees: 50, Items: []string{"Milk"}}
+	unparsedA := blink.Order{RawDate: "Tomorrow, 9:00 am", AmountRupees: 50}
+	unparsedB := blink.Order{RawDate: "Tomorrow, 7:00 pm", AmountRupees: 50}
+
+	merged, newCount := MergeOrders([]blink.Order{sameDayAM, unparsedA}, []blink.Order{sameDayPM, unparsedB})
+	if newCount != 2 || len(merged) != 4 {
+		t.Fatalf("newCount=%d len=%d, want 2 and 4", newCount, len(merged))
+	}
+}
+
+// Legacy dates hold IST wall-clock values labeled with the machine's zone.
+func TestMergeOrdersRolloverWithLegacyZone(t *testing.T) {
+	pst := time.FixedZone("PST", -8*3600)
+	ist := time.FixedZone("IST", 5*3600+1800)
+	legacy := time.Date(2025, 10, 19, 19, 56, 0, 0, pst)
+	fresh := time.Date(2025, 10, 19, 0, 0, 0, 0, ist)
+	merged, _ := MergeOrders([]blink.Order{{ID: "1", Date: legacy}}, []blink.Order{{ID: "1", Date: fresh}})
+	want := time.Date(2025, 10, 19, 19, 56, 0, 0, ist)
+	if !merged[0].Date.Equal(want) {
+		t.Fatalf("got %v, want %v (stored time kept, relabeled IST)", merged[0].Date, want)
+	}
+}
+
+func TestStoreSaveIsAtomic(t *testing.T) {
+	dir := t.TempDir()
+	st := &Store{Path: filepath.Join(dir, "orders.json")}
+	if err := st.Save([]blink.Order{{ID: "1"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Save([]blink.Order{{ID: "1"}, {ID: "2"}}); err != nil {
+		t.Fatal(err)
+	}
+	entries, _ := os.ReadDir(dir)
+	if len(entries) != 1 {
+		t.Fatalf("expected only orders.json, found %d entries (temp file leaked?)", len(entries))
+	}
+	info, _ := os.Stat(st.Path)
+	if info.Mode().Perm() != 0o600 {
+		t.Fatalf("perm = %v, want 0600", info.Mode().Perm())
+	}
+	if got, _ := st.Load(); len(got) != 2 {
+		t.Fatalf("loaded %d orders, want 2", len(got))
+	}
+}
+
+func TestStoreSaveKeepsSymlink(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "real.json")
+	link := filepath.Join(dir, "orders.json")
+	if err := os.WriteFile(target, []byte("[]"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatal(err)
+	}
+	st := &Store{Path: link}
+	if err := st.Save([]blink.Order{{ID: "1"}}); err != nil {
+		t.Fatal(err)
+	}
+	if fi, _ := os.Lstat(link); fi.Mode()&os.ModeSymlink == 0 {
+		t.Fatal("symlink was replaced by a regular file")
+	}
+	if got, _ := (&Store{Path: target}).Load(); len(got) != 1 {
+		t.Fatalf("target has %d orders, want 1", len(got))
+	}
+}
+
+func TestStoreSaveRejectsBrokenSymlink(t *testing.T) {
+	dir := t.TempDir()
+	link := filepath.Join(dir, "orders.json")
+	if err := os.Symlink(filepath.Join(dir, "missing", "real.json"), link); err != nil {
+		t.Fatal(err)
+	}
+	if err := (&Store{Path: link}).Save([]blink.Order{{ID: "1"}}); err == nil {
+		t.Fatal("expected error for broken symlink")
+	}
+	if fi, _ := os.Lstat(link); fi.Mode()&os.ModeSymlink == 0 {
+		t.Fatal("broken symlink was replaced by a regular file")
+	}
+}
+
+func TestStoreSaveKeepsExistingMode(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "orders.json")
+	if err := os.WriteFile(path, []byte("[]"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(path, 0o640); err != nil {
+		t.Fatal(err)
+	}
+	if err := (&Store{Path: path}).Save([]blink.Order{{ID: "1"}}); err != nil {
+		t.Fatal(err)
+	}
+	if fi, _ := os.Stat(path); fi.Mode().Perm() != 0o640 {
+		t.Fatalf("mode = %v, want 0640", fi.Mode().Perm())
 	}
 }

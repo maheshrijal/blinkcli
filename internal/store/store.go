@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"blinkcli/internal/blink"
 	"blinkcli/internal/config"
@@ -49,7 +50,46 @@ func (s *Store) Save(orders []blink.Order) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(s.Path, data, 0o600)
+	// Write into the symlink target, if any, so renaming doesn't replace the link.
+	path := s.Path
+	if fi, err := os.Lstat(path); err == nil && fi.Mode()&os.ModeSymlink != 0 {
+		if path, err = filepath.EvalSymlinks(path); err != nil {
+			return fmt.Errorf("orders.json symlink is broken: %w", err)
+		}
+	}
+	// Temp file (CreateTemp uses 0600) + fsync + rename: never a truncated orders.json.
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".orders-*.json")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(tmp.Name())
+	// Keep an existing file's mode; new files stay at CreateTemp's 0600.
+	if fi, err := os.Stat(path); err == nil {
+		if err := tmp.Chmod(fi.Mode().Perm()); err != nil {
+			tmp.Close()
+			return err
+		}
+	}
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(tmp.Name(), path); err != nil {
+		return err
+	}
+	// Best-effort directory fsync for rename durability; some filesystems don't support it.
+	if dir, err := os.Open(filepath.Dir(path)); err == nil {
+		_ = dir.Sync()
+		dir.Close()
+	}
+	return nil
 }
 
 // MergeOrders merges incoming orders into existing ones, returning the merged list and new count.
@@ -73,10 +113,11 @@ func MergeOrders(existing, incoming []blink.Order) ([]blink.Order, int) {
 			key = fmt.Sprintf("unknown-incoming-%d", unknownIncoming)
 			unknownIncoming++
 		}
-		if _, ok := seen[key]; !ok {
-			seen[key] = order
+		prev, ok := seen[key]
+		if !ok {
 			newCount++
 		}
+		seen[key] = mergeOrder(prev, order)
 	}
 
 	merged := make([]blink.Order, 0, len(seen))
@@ -96,6 +137,48 @@ func MergeOrders(existing, incoming []blink.Order) ([]blink.Order, int) {
 	return merged, newCount
 }
 
+// mergeOrder prefers fresh fields but keeps stored ones a failed parse left empty.
+func mergeOrder(prev, next blink.Order) blink.Order {
+	if next.CartID == "" {
+		next.CartID = prev.CartID
+	}
+	if next.Status == "" {
+		next.Status = prev.Status
+	}
+	if next.Title == "" {
+		next.Title = prev.Title
+	}
+	if next.AmountRupees == 0 {
+		next.AmountRupees = prev.AmountRupees
+	}
+	if next.Date.IsZero() {
+		next.Date = prev.Date
+	} else if sameDay(prev.Date, next.Date) && isMidnight(next.Date) && !isMidnight(prev.Date) {
+		// Older-year dates lose their time ("19 Oct 2025"); keep the stored time of day.
+		p, n := prev.Date, next.Date
+		next.Date = time.Date(n.Year(), n.Month(), n.Day(), p.Hour(), p.Minute(), 0, 0, n.Location())
+	}
+	if next.RawDate == "" {
+		next.RawDate = prev.RawDate
+	}
+	if len(next.Items) == 0 {
+		next.Items = prev.Items
+	}
+	return next
+}
+
+// sameDay compares wall-clock dates (legacy rows hold IST values in the local zone).
+func sameDay(a, b time.Time) bool {
+	if a.IsZero() || b.IsZero() {
+		return false
+	}
+	return a.Year() == b.Year() && a.YearDay() == b.YearDay()
+}
+
+func isMidnight(t time.Time) bool {
+	return t.Hour() == 0 && t.Minute() == 0
+}
+
 func orderKey(order blink.Order) string {
 	if order.ID != "" {
 		return "id:" + order.ID
@@ -103,13 +186,18 @@ func orderKey(order blink.Order) string {
 	if order.CartID != "" {
 		return "cart:" + order.CartID
 	}
+	// Best effort without an ID; RawDate drifts, so use it only if the date didn't parse.
 	if !order.Date.IsZero() || order.AmountRupees != 0 || order.Title != "" || order.RawDate != "" || len(order.Items) > 0 {
+		rawDate := ""
+		if order.Date.IsZero() {
+			rawDate = order.RawDate
+		}
 		return strings.Join([]string{
 			"fallback",
 			order.Date.Format("2006-01-02 15:04"),
+			rawDate,
 			strconvAmount(order.AmountRupees),
 			order.Title,
-			order.RawDate,
 			strings.Join(order.Items, "|"),
 		}, ":")
 	}
