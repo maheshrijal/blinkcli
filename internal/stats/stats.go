@@ -10,10 +10,11 @@ import (
 )
 
 type Summary struct {
-	TotalOrders int
-	TotalAmount int
-	Monthly     []Bucket
-	Yearly      []Bucket
+	TotalOrders     int
+	TotalAmount     int
+	CancelledOrders int
+	Monthly         []Bucket
+	Yearly          []Bucket
 }
 
 type Bucket struct {
@@ -22,12 +23,22 @@ type Bucket struct {
 	Amount int
 }
 
-// BuildSummary aggregates orders into monthly and yearly buckets.
+// BuildSummary aggregates orders into monthly and yearly buckets; cancelled orders are counted separately.
 func BuildSummary(orders []blink.Order) Summary {
 	monthly := map[string]*Bucket{}
 	yearly := map[string]*Bucket{}
 
+	counted := make([]blink.Order, 0, len(orders))
+	cancelled := 0
 	for _, order := range orders {
+		if strings.EqualFold(order.Status, "CANCELLED") {
+			cancelled++
+			continue
+		}
+		counted = append(counted, order)
+	}
+
+	for _, order := range counted {
 		if order.Date.IsZero() {
 			continue
 		}
@@ -39,10 +50,11 @@ func BuildSummary(orders []blink.Order) Summary {
 	}
 
 	return Summary{
-		TotalOrders: len(orders),
-		TotalAmount: sumAmounts(orders),
-		Monthly:     sortedBuckets(monthly),
-		Yearly:      sortedBuckets(yearly),
+		TotalOrders:     len(counted),
+		TotalAmount:     sumAmounts(counted),
+		CancelledOrders: cancelled,
+		Monthly:         sortedBuckets(monthly),
+		Yearly:          sortedBuckets(yearly),
 	}
 }
 
@@ -80,6 +92,9 @@ func sortedBuckets(store map[string]*Bucket) []Bucket {
 func FormatSummary(summary Summary) string {
 	lines := []string{
 		fmt.Sprintf("Total: %d orders, ₹%d", summary.TotalOrders, summary.TotalAmount),
+	}
+	if summary.CancelledOrders > 0 {
+		lines = append(lines, fmt.Sprintf("Cancelled: %d orders (excluded)", summary.CancelledOrders))
 	}
 
 	if len(summary.Yearly) > 0 {

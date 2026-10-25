@@ -60,6 +60,8 @@ blinkcli orders
 blinkcli stats
 ```
 
+Cancelled orders are excluded from counts and spend, and shown on a separate line.
+
 ## Data storage
 
 - Config (session data):
